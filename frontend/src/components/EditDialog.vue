@@ -1,0 +1,146 @@
+<script setup>
+import { reactive, ref, computed, watch, onUnmounted } from 'vue'
+import { ST, dlg, closeDlg, upsertRow, removeRow, toast, getDraft, setDraft, clearDraft, staff } from '../stores/bid'
+import { S0, FORM_ITEMS } from '../lib/fields'
+import { can, canSee, canWrite, fieldMode } from '../stores/perm'
+
+const canEdit = computed(() => can('bid.edit'));
+const canDel = computed(() => can('bid.delete'));
+/* 只读 / 脱敏 字段都会禁用编辑，标签提示对应档位 */
+function lockTag(k){ const m = fieldMode(k); return m === 'masked' ? '脱敏' : (m === 'readonly' ? '只读' : ''); }
+
+/* 按字段权限过滤表单：不可见字段不渲染，空分组不显示 */
+const formItems = computed(() => {
+  const out = [];
+  let grp = null;
+  FORM_ITEMS.forEach(it => {
+    if(it.type === 'grp'){ grp = it; return; }
+    if(!canSee(it.f.k)) return;
+    if(grp){ out.push(grp); grp = null; }
+    out.push(it);
+  });
+  return out;
+});
+
+const STAFF_KEYS = ['lead', 'copilot', 'reviewer'];   // 允许从员工名单选择的字段
+/* datalist 候选：员工名单 ∪ 台账三个人员字段的历史人名 */
+const staffOpts = computed(() => {
+  const set = new Set(staff.list.map(p => p.displayName));
+  ST.rows.forEach(r => STAFF_KEYS.forEach(k => { const v = String(r[k] || '').trim(); if(v) set.add(v); }));
+  return [...set].sort((a,b) => a.localeCompare(b,'zh'));
+});
+
+const draft = reactive({});
+const confirmLeave = ref(false);      // 「内容未保存」提示
+let baseSnap = '';                    // 打开时的内容快照，用于脏检查
+
+const dirty = computed(() => JSON.stringify(draft) !== baseSnap);
+
+watch(() => dlg.open, v => {
+  if(v){
+    const r = dlg.id ? ST.rows.find(x => x.id === dlg.id) : null;
+    Object.keys(draft).forEach(k => delete draft[k]);
+    Object.assign(draft, S0({}), {method:'公开招标', bondType:'银行转账', bondStatus:'未缴', result:'待开标'}, r || {});
+    const st = getDraft(dlg.id);      // 恢复上次未保存的草稿
+    if(st) Object.assign(draft, st);
+    baseSnap = JSON.stringify(draft);
+    confirmLeave.value = false;
+    document.addEventListener('keydown', onKey);
+  }else{
+    document.removeEventListener('keydown', onKey);
+  }
+});
+onUnmounted(() => document.removeEventListener('keydown', onKey));
+
+function onKey(e){
+  if(e.key === 'Escape'){
+    if(confirmLeave.value) confirmLeave.value = false;
+    else attemptClose();
+  }
+}
+/* 所有关闭入口（点外围 / 关闭✕ / 取消 / Esc）：有未保存内容先询问 */
+function attemptClose(){
+  if(dirty.value){ confirmLeave.value = true; return; }
+  closeDlg();
+}
+function saveDlg(){
+  confirmLeave.value = false;
+  const o = {};
+  Object.keys(draft).forEach(k => { o[k] = typeof draft[k] === 'string' ? draft[k].trim() : draft[k]; });
+  if(!o.projectName){ toast('请填写项目名称'); return; }
+  if(!o.openTime){ toast('请填写开标时间'); return; }
+  if(!o.lead){ toast('请填写标书负责人'); return; }
+  if(['中标','未中标'].indexOf(o.result) >= 0 && !o.winner){
+    if(!confirm('未填写中标单位，确认保存？')) return;
+  }
+  clearDraft(dlg.id);                 // 已正式保存，草稿不再需要
+  upsertRow(dlg.id, o);
+}
+function keepDraft(){
+  setDraft(dlg.id, draft);
+  confirmLeave.value = false;
+  closeDlg();
+  toast(dlg.id ? '已存草稿，下次编辑该标段时自动恢复' : '已存草稿，下次新增标段时自动恢复');
+}
+const updatedInfo = computed(() => {
+  const r = dlg.id ? ST.rows.find(x => x.id === dlg.id) : null;
+  if(!r || !r._updatedBy) return '';
+  const t = r._updatedAt ? new Date(r._updatedAt * 1000).toLocaleString('zh-CN', {hour12:false}) : '';
+  return '最近由 ' + r._updatedBy + ' 更新于 ' + t;
+});
+</script>
+
+<template>
+  <div class="mask" :class="{on: dlg.open}" @click.self="attemptClose()">
+    <div class="dlg">
+      <div class="dlg-h">
+        <h3>{{ dlg.id ? '编辑标段信息' : '新增标段' }}</h3>
+        <span class="act" style="color:var(--mut)" @click="attemptClose()">关闭 ✕</span>
+      </div>
+      <div class="dlg-b">
+        <div class="form">
+          <template v-for="it in formItems" :key="it.key">
+            <div v-if="it.type === 'grp'" class="grp-title">{{ it.label }}</div>
+            <div v-else class="fld" :class="{span2: it.f.span === 2, span3: it.f.span === 3}">
+              <label>{{ it.f.l }}<b v-if="it.f.req"> *</b>
+                <em v-if="lockTag(it.f.k)" class="ro-tag" :class="{masked: fieldMode(it.f.k) === 'masked'}">{{ lockTag(it.f.k) }}</em>
+              </label>
+              <select v-if="it.f.t === 'select'" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)">
+                <option value="">请选择</option>
+                <option v-for="o in it.f.opt" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <input v-else-if="it.f.t === 'date'" type="date" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)">
+              <input v-else-if="it.f.t === 'num'" type="number" step="0.01" placeholder="0.00" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)">
+              <textarea v-else-if="it.f.t2 === 'area'" placeholder="补充说明" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)"></textarea>
+              <input v-else type="text" :placeholder="it.f.l" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)" :list="STAFF_KEYS.indexOf(it.f.k) >= 0 ? 'staffList' : undefined">
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="dlg-f">
+        <button class="btn danger" style="margin-right:auto" v-if="dlg.id && canDel" @click="removeRow(dlg.id)">删除此条</button>
+        <span v-if="updatedInfo" style="font-size:11px;color:var(--sub);align-self:center;margin:0 6px">{{ updatedInfo }}</span>
+        <button class="btn" @click="attemptClose()">取消</button>
+        <button v-if="canEdit" class="btn pri" @click="saveDlg()">保存</button>
+      </div>
+    </div>
+  </div>
+  <div class="mask" :class="{on: confirmLeave}" style="z-index:120;" @click.self="confirmLeave = false">
+    <div class="dlg" style="width:460px">
+      <div class="dlg-h"><h3>内容未保存</h3><span class="act" style="color:var(--mut)" @click="confirmLeave = false">关闭 ✕</span></div>
+      <div class="dlg-b">
+        <div style="font-size:12.5px;color:var(--txt);line-height:1.7">当前{{ dlg.id ? '标段的修改' : '新增的内容' }}尚未保存，直接离开将丢失。</div>
+        <div style="font-size:11.5px;color:var(--sub);margin-top:6px">「存草稿」会把内容暂存在本机浏览器（不进台账、不同步给同事），下次打开时自动恢复。</div>
+      </div>
+      <div class="dlg-f">
+        <button class="btn" @click="confirmLeave = false">取消，继续编辑</button>
+        <button class="btn" @click="keepDraft()">存草稿</button>
+        <button class="btn pri" @click="saveDlg()">保存</button>
+      </div>
+    </div>
+  </div>
+  <!-- 员工名单候选（datalist：可选择也可自由输入，兼容历史数据中的外部人员） -->
+  <datalist id="staffList">
+    <option v-for="p in staffOpts" :key="p" :value="p"></option>
+  </datalist>
+</template>

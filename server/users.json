@@ -1,0 +1,8 @@
+{
+  "_说明": "账号清单：key=登录账号；password=密码；display_name=页面显示名；is_admin=true 为管理员（可进「用户管理」页增删改账号）。在页面里增删改用户会自动写回本文件；直接改本文件后重启服务同样生效。下划线开头的键会被忽略。",
+  "admin": {
+    "password": "123456",
+    "display_name": "管理员",
+    "is_admin": true
+  }
+}
