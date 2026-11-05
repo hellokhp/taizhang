@@ -1,5 +1,5 @@
 /* ================================================================
-   字段配置（30 字段）、示例数据、导入解析归一化、行级纯函数
+   字段配置（48 字段）、示例数据、导入解析归一化、行级纯函数
    ================================================================ */
 import { pad, parseD } from './format'
 
@@ -21,18 +21,37 @@ export const F = [
   {k:'budget',      l:'预算/最高限价（万元）', t:'num', g:'金额与保证金'},
   {k:'ourPrice',    l:'我方报价（万元）', t:'num',   g:'金额与保证金'},
   {k:'bondType',    l:'保证金形式',      t:'select', g:'金额与保证金', opt:['银行转账','银行保函','保险保单','担保公司保函','现金','免缴']},
-  {k:'bondAmount',  l:'投标保证金金额（万元）', t:'num', g:'金额与保证金', span:2},
+  /* 投标保证金：金额 / 状态 / 退回时间 同一行，下面一行是投标保函四项 */
+  {k:'bondAmount',  l:'投标保证金金额（万元）', t:'num', g:'金额与保证金'},
   {k:'bondStatus',  l:'投标保证金状态',  t:'select', g:'金额与保证金', opt:['无需缴纳','未缴','已缴','已退','不予退还']},
-  {k:'perfAmount',  l:'履约保证金金额（万元）', t:'num', g:'金额与保证金', span:2},
+  {k:'bondBackDate',l:'投标保证金退回时间', t:'date', g:'金额与保证金', cl:'投标退回时间'},
+  {k:'bondIssuer',  l:'投标保函开具行 / 收款单位', t:'text', g:'金额与保证金', span:3, cl:'投标保函开具行'},
+  {k:'bondNo',      l:'投标保函 / 凭证编号', t:'text', g:'金额与保证金', cl:'投标保函编号'},
+  {k:'bondPayDate', l:'投标缴纳 / 开具日期', t:'date', g:'金额与保证金', cl:'投标缴纳日期'},
+  {k:'bondDue',     l:'投标保函有效期',  t:'date',   g:'金额与保证金', cl:'投标保函有效期'},
+  /* 履约保证金：与投标保证金同结构，退回时间与保函四项各自独立 */
+  {k:'perfAmount',  l:'履约保证金金额（万元）', t:'num', g:'金额与保证金'},
   {k:'perfStatus',  l:'履约保证金状态',  t:'select', g:'金额与保证金', opt:['无需缴纳','未缴','已缴','已退','不予退还']},
-  {k:'bondIssuer',  l:'保函开具行 / 收款单位', t:'text', g:'金额与保证金', span:2},
-  {k:'bondNo',      l:'保函/凭证编号',   t:'text',   g:'金额与保证金'},
-  {k:'bondPayDate', l:'缴纳/开具日期',   t:'date',   g:'金额与保证金'},
-  {k:'bondBackDate',l:'退回/解保日期',   t:'date',   g:'金额与保证金'},
-  {k:'bondDue',     l:'保函有效期至',    t:'date',   g:'金额与保证金'},
+  {k:'perfBackDate',l:'履约保证金退回时间', t:'date', g:'金额与保证金', cl:'履约退回时间'},
+  {k:'perfIssuer',  l:'履约保函开具行 / 收款单位', t:'text', g:'金额与保证金', span:3, cl:'履约保函开具行'},
+  {k:'perfNo',      l:'履约保函 / 凭证编号', t:'text', g:'金额与保证金', cl:'履约保函编号'},
+  {k:'perfPayDate', l:'履约缴纳 / 开具日期', t:'date', g:'金额与保证金', cl:'履约缴纳日期'},
+  {k:'perfDue',     l:'履约保函有效期',  t:'date',   g:'金额与保证金', cl:'履约保函有效期'},
   {k:'lead',        l:'标书负责人',      t:'text',   g:'人员分工', req:1},
   {k:'copilot',     l:'协作人',          t:'text',   g:'人员分工'},
   {k:'reviewer',    l:'审核人',          t:'text',   g:'人员分工'},
+  /* 标书进度：状态由员工单向推进（未开始→进行中→已结束），回退仅管理员；
+     三个时间点为状态切换时自动记录，ro=1 表示表单里默认只读（管理员可修正）；
+     bidEffort 为派生字段（不落库），由 进行中时间 → 已结束时间/今天 计算天数 */
+  {k:'bidStatus',   l:'标书状态',        t:'select', g:'标书进度', opt:['未开始','进行中','已结束']},
+  {k:'bidWaitAt',   l:'未开始时间',      t:'date',   g:'标书进度', ro:1},
+  {k:'bidStartAt',  l:'进行中时间',      t:'date',   g:'标书进度', ro:1},
+  {k:'bidEndAt',    l:'已结束时间',      t:'date',   g:'标书进度', ro:1},
+  {k:'bidEffort',   l:'标书投入时间',     t:'num', g:'标书进度', der:1},
+  /* 项目开销：投标过程中的三项直接成本（万元），用于单项目 / 阶段成本核算 */
+  {k:'docFee',      l:'购买标书费（万元）', t:'num', g:'项目开销'},
+  {k:'travelFee',   l:'差旅费（万元）',   t:'num',   g:'项目开销'},
+  {k:'sampleFee',   l:'样品费（万元）',   t:'num',   g:'项目开销'},
   {k:'result',      l:'开标结果',        t:'select', g:'开标结果', req:1, opt:['待开标','中标','未中标','废标','流标','不投','放弃']},
   {k:'winner',      l:'中标单位',        t:'text',   g:'开标结果', span:2},
   {k:'winAmount',   l:'中标金额（万元）', t:'num',   g:'开标结果'},
@@ -42,11 +61,14 @@ export const F = [
 ];
 export const FMAP = {}; F.forEach(f => FMAP[f.k] = f);
 export const RESULT_OPTS = ['待开标','中标','未中标','废标','流标','不投','放弃'];
+export const BID_STATUS_OPTS = ['未开始','进行中','已结束'];
+export const BID_RANK = {'未开始':0, '进行中':1, '已结束':2};
 export const METHOD_OPTS = FMAP.method.opt;
-/* 编辑表单渲染项：分组标题 + 字段 */
+/* 编辑表单渲染项：分组标题 + 字段（派生字段不进表单，如「标书投入时间」） */
 export const FORM_ITEMS = [];
 { let lastG = '';
   F.forEach(f => {
+    if(f.der) return;
     if(f.g !== lastG){ FORM_ITEMS.push({type:'grp', key:'g-' + f.g, label:f.g}); lastG = f.g; }
     FORM_ITEMS.push({type:'fld', key:f.k, f});
   });
@@ -59,7 +81,11 @@ export function S0(o){ return Object.assign({
   deadline:'',openTime:'',openAddr:'',
   budget:'',ourPrice:'',bondAmount:'',bondType:'银行转账',bondStatus:'已缴',perfAmount:'',perfStatus:'无需缴纳',
   bondIssuer:'',bondNo:'',bondPayDate:'',bondBackDate:'',bondDue:'',
-  lead:'',copilot:'',reviewer:'',result:'待开标',winner:'',winAmount:'',rank:'',noticeUrl:'',remark:''
+  perfBackDate:'',perfIssuer:'',perfNo:'',perfPayDate:'',perfDue:'',
+  lead:'',copilot:'',reviewer:'',
+  bidStatus:'未开始',bidWaitAt:'',bidStartAt:'',bidEndAt:'',
+  docFee:'',travelFee:'',sampleFee:'',
+  result:'待开标',winner:'',winAmount:'',rank:'',noticeUrl:'',remark:''
 }, o); }
 const SAMPLE = [
   S0({projectName:'市人民医院导视系统升级改造',bidNo:'ZB-2026-0107',agency:'中招国际招标有限公司',owner:'市人民医院',region:'市区',method:'公开招标',deadline:'2026-01-07',openTime:'2026-01-09',budget:210,ourPrice:186,bondAmount:4,bondStatus:'已退',bondPayDate:'2026-01-04',bondBackDate:'2026-03-02',lead:'张伟',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:186,rank:'1'}),
@@ -106,6 +132,45 @@ export function isNoBid(r){
 }
 export function isDecided(r){ return ['中标','未中标','废标','流标'].indexOf(r.result) >= 0; }
 
+/* ==================== 标书进度（状态 + 投入时间） ==================== */
+/* 老数据没有该字段时按「未开始」处理 */
+export function bidStatusOf(r){ return (r && r.bidStatus) || '未开始'; }
+/* 标书投入时间（天）：进行中时间 → 已结束时间（未结束则算到今天），不足一天按一天 */
+export function bidEffortDays(r){
+  const s = parseD(r && r.bidStartAt);
+  if(!s) return '';
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const e = parseD(r.bidEndAt) || now;
+  return Math.max(1, Math.ceil((e.getTime() - s.getTime()) / 86400000));
+}
+/* 目标状态是否被锁定（非管理员不可回退；管理员任意改） */
+export function bidStatusLocked(target, cur, isAdmin){
+  if(isAdmin) return false;
+  const a = BID_RANK[target], b = BID_RANK[cur || '未开始'];
+  return a !== undefined && b !== undefined && a < b;
+}
+/* 状态变化时写入对应状态时间点（就地修改 o，返回是否有变化）：
+   进行中 → 记录开始时间；已结束 → 记录结束时间（缺开始时间则补齐）；回退到未开始 → 清空后续时间 */
+export function stampBidStatus(o, prev){
+  const cur = String(o.bidStatus || '').trim();
+  const old = String(prev || '').trim();
+  if(!cur || cur === old) return false;
+  const d = new Date();
+  const today = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  if(cur === '进行中'){
+    if(!o.bidStartAt) o.bidStartAt = today;
+    o.bidEndAt = '';
+  }else if(cur === '已结束'){
+    o.bidEndAt = today;
+    if(!o.bidStartAt) o.bidStartAt = today;
+  }else{
+    o.bidWaitAt = today;
+    o.bidStartAt = '';
+    o.bidEndAt = '';
+  }
+  return true;
+}
+
 const GUAR_TYPES = ['银行保函','保险保单','担保公司保函'];
 export function bondKind(r){
   const t = r.bondType || '';
@@ -138,12 +203,31 @@ export const ALIAS = {
  '项目类型':'projType','采购类型':'projType','行业':'industry','所属行业':'industry','行业类型':'industry',
  '省份':'province','所在省份':'province','所属省份':'province',
  '保证金形式':'bondType','缴纳形式':'bondType','保证金方式':'bondType','保证金类型':'bondType','保函类型':'bondType','形式':'bondType',
+ /* 投标保函四项（旧的通用列名一律落到投标侧，保持历史表格可导入） */
  '开具行':'bondIssuer','保函开具行':'bondIssuer','出具单位':'bondIssuer','开户行':'bondIssuer','收款单位':'bondIssuer','保函出具银行':'bondIssuer',
+ '投标保函开具行':'bondIssuer','投标保函开具行/收款单位':'bondIssuer','投标收款单位':'bondIssuer',
  '保函编号':'bondNo','凭证编号':'bondNo','保函数号':'bondNo','流水号':'bondNo',
+ '投标保函编号':'bondNo','投标凭证编号':'bondNo','投标保函/凭证编号':'bondNo',
  '保函有效期':'bondDue','保函有效期至':'bondDue','保函到期日':'bondDue','有效期至':'bondDue',
- '缴纳日期':'bondPayDate','缴纳时间':'bondPayDate','退回日期':'bondBackDate','退款日期':'bondBackDate',
+ '投标保函有效期':'bondDue','投标保函有效期至':'bondDue',
+ '缴纳日期':'bondPayDate','缴纳时间':'bondPayDate','开具日期':'bondPayDate',
+ '投标缴纳日期':'bondPayDate','投标缴纳/开具日期':'bondPayDate',
+ '退回日期':'bondBackDate','退款日期':'bondBackDate','解保日期':'bondBackDate',
+ '投标保证金退回时间':'bondBackDate','投标退回时间':'bondBackDate','投标退回日期':'bondBackDate',
+ /* 履约保函四项 */
+ '履约保函开具行':'perfIssuer','履约保函开具行/收款单位':'perfIssuer','履约收款单位':'perfIssuer','履约开具行':'perfIssuer',
+ '履约保函编号':'perfNo','履约凭证编号':'perfNo','履约保函/凭证编号':'perfNo',
+ '履约缴纳日期':'perfPayDate','履约开具日期':'perfPayDate','履约缴纳/开具日期':'perfPayDate',
+ '履约保函有效期':'perfDue','履约保函有效期至':'perfDue','履约保函到期日':'perfDue',
+ '履约保证金退回时间':'perfBackDate','履约退回时间':'perfBackDate','履约退回日期':'perfBackDate',
  '负责人':'lead','标书负责人':'lead','编制人':'lead','制作人':'lead','责任人':'lead','标书制作人':'lead',
+ '标书状态':'bidStatus','标书进度':'bidStatus','编写状态':'bidStatus','制作状态':'bidStatus',
+ '未开始时间':'bidWaitAt','进行中时间':'bidStartAt','已结束时间':'bidEndAt',
+ '开始编写时间':'bidStartAt','编写完成时间':'bidEndAt','标书开始时间':'bidStartAt','标书完成时间':'bidEndAt',
  '结果':'result','开标结果':'result','中标结果':'result','投标结果':'result',
+ '购买标书费':'docFee','标书费':'docFee','标书购买费':'docFee','文件费':'docFee','购买招标文件费':'docFee','招标文件费':'docFee','标书工本费':'docFee',
+ '差旅费':'travelFee','差旅':'travelFee','差旅费用':'travelFee','交通差旅费':'travelFee','出差费':'travelFee',
+ '样品费':'sampleFee','样品费用':'sampleFee','打样费':'sampleFee','样品制作费':'sampleFee',
  '中标人':'winner','中标供应商':'winner','中标方':'winner','中标企业':'winner','中标公司':'winner',
  '中标金额':'winAmount','中标价':'winAmount','中标金额(万元)':'winAmount',
  '排名':'rank','名次':'rank',
@@ -161,6 +245,14 @@ export function normResult(v){
   if(/中/.test(s) && !/未|没/.test(s)) return '中标';
   if(/待|未开|进行/.test(s)) return '待开标';
   return '待开标';
+}
+export function normBidStatus(v){
+  const s = String(v||'').trim();
+  if(!s) return '未开始';
+  if(/未开始|未启动|待开始|未编写|未动|未着手/.test(s)) return '未开始';
+  if(/已结束|结束|完成|定稿|已交|已递/.test(s)) return '已结束';
+  if(/进行|编写|编制|制作|开始|启动|在写/.test(s)) return '进行中';
+  return '未开始';
 }
 export function normBond(v){
   const s = String(v||'').trim();
@@ -217,6 +309,7 @@ export function rowsFromMatrix(mtx){
     const o = {}; let filled = 0;
     map.forEach((k,j) => {
       if(!k) return;
+      if(FMAP[k] && FMAP[k].der) return;      // 派生字段不从表格导入（如标书投入时间）
       let v = row[j];
       if(v == null || v === '') return;
       if(k === '__bid'){
@@ -224,10 +317,12 @@ export function rowsFromMatrix(mtx){
         return;
       }
       if(k === 'result') v = normResult(v);
+      else if(k === 'bidStatus') v = normBidStatus(v);
       else if(k === 'bondStatus' || k === 'perfStatus') v = normBond(v);
       else if(k === 'bondType') v = normBondType(v);
-      else if(['budget','ourPrice','bondAmount','perfAmount','winAmount'].indexOf(k) >= 0) v = normNum(v);
-      else if(['deadline','openTime','bondPayDate','bondBackDate','bondDue'].indexOf(k) >= 0) v = normDate(v);
+      else if(['budget','ourPrice','bondAmount','perfAmount','winAmount','docFee','travelFee','sampleFee'].indexOf(k) >= 0) v = normNum(v);
+      else if(['deadline','openTime','bondPayDate','bondBackDate','bondDue',
+               'perfPayDate','perfBackDate','perfDue','bidWaitAt','bidStartAt','bidEndAt'].indexOf(k) >= 0) v = normDate(v);
       else v = String(v).trim();
       o[k] = v; filled++;
     });

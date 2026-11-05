@@ -1,93 +1,257 @@
 # -*- coding: utf-8 -*-
-"""亚德彩投标台账 · 内网协作后端（FastAPI + SQLite）
+"""亚德彩投标台账 · 内网协作后端（FastAPI + PostgreSQL）
 
 启动：
     python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
 （或直接双击 start_api.bat）
 
 账号管理：编辑本目录 users.json 后重启服务即可，启动时自动同步进数据库。
-数据文件：本目录 data.db（SQLite，定期复制该文件即完成备份）。
+数据库：PostgreSQL，默认 127.0.0.1:5432 / 库 yadecai；
+        可用环境变量 PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DB 覆盖。
+首次启动自动建表；若 PG 为空且存在历史 SQLite 文件 server/data.db，会自动迁移其中全部数据。
 """
 import hashlib
 import json
-import sqlite3
+import os
 import threading
 import time
 import uuid
+from datetime import date
 from pathlib import Path
 
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent
-DB_PATH = BASE / 'data.db'
+DB_PATH = BASE / 'data.db'          # 历史 SQLite 数据文件（仅用于一次性迁移，迁移后作为回滚备份保留）
 USERS_PATH = BASE / 'users.json'
 
-db = sqlite3.connect(DB_PATH, check_same_thread=False)
-db.row_factory = sqlite3.Row
-lock = threading.RLock()
+PG_CONF = {
+    'host': os.environ.get('PG_HOST', '127.0.0.1'),
+    'port': int(os.environ.get('PG_PORT', '5432')),
+    'user': os.environ.get('PG_USER', 'postgres'),
+    'password': os.environ.get('PG_PASSWORD', 'yinhe123.'),
+    'dbname': os.environ.get('PG_DB', 'yadecai'),
+}
 
-with lock:
-    db.executescript('''
-    CREATE TABLE IF NOT EXISTS users(
-      username TEXT PRIMARY KEY,
-      pass_hash TEXT NOT NULL,
-      display_name TEXT DEFAULT '',
-      is_admin INTEGER DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS rows(
-      rid TEXT PRIMARY KEY,
-      payload TEXT NOT NULL,
-      updated_by TEXT DEFAULT '',
-      updated_at REAL NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_rows_ts ON rows(updated_at);
-    CREATE TABLE IF NOT EXISTS deleted(
-      rid TEXT PRIMARY KEY,
-      ts REAL NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS sessions(
-      token TEXT PRIMARY KEY,
-      username TEXT NOT NULL,
-      created REAL NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS roles(
-      key TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      is_system INTEGER DEFAULT 0,
-      perms TEXT NOT NULL DEFAULT '{}',
-      field_perms TEXT NOT NULL DEFAULT '{}',
-      data_scope TEXT DEFAULT 'ALL'
-    );
-    CREATE TABLE IF NOT EXISTS audit_log(
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ts REAL NOT NULL,
-      username TEXT NOT NULL,
-      rid TEXT DEFAULT '',
-      action TEXT NOT NULL,
-      field TEXT NOT NULL,
-      old_value TEXT DEFAULT '',
-      new_value TEXT DEFAULT '',
-      allowed INTEGER DEFAULT 1
-    );
-    CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
-    ''')
-    db.commit()
-    # 兼容旧库：补 is_admin / role_key 列
-    cols = [r['name'] for r in db.execute('PRAGMA table_info(users)').fetchall()]
-    if 'is_admin' not in cols:
-        db.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0')
-    if 'role_key' not in cols:
-        db.execute("ALTER TABLE users ADD COLUMN role_key TEXT DEFAULT 'staff'")
-    rcols = [r['name'] for r in db.execute('PRAGMA table_info(roles)').fetchall()]
-    if 'data_scope' not in rcols:
-        db.execute("ALTER TABLE roles ADD COLUMN data_scope TEXT DEFAULT 'ALL'")
-    db.commit()
+lock = threading.RLock()
+_local = threading.local()
+
+
+def _conn():
+    """每线程一个连接（FastAPI 同步接口在线程池中执行，psycopg2 连接不可跨线程共享）。"""
+    conn = getattr(_local, 'conn', None)
+    if conn is None or conn.closed:
+        conn = psycopg2.connect(**PG_CONF)
+        conn.autocommit = False
+        _local.conn = conn
+    return conn
+
+
+class PgDB:
+    """沿用原 SQLite 调用习惯（? 占位符 / executemany / commit / executescript）访问 PostgreSQL。
+    读语句执行完立即结束只读事务；写语句由调用方 commit() 提交，异常时自动回滚。"""
+
+    @staticmethod
+    def _sql(sql):
+        return sql.replace('?', '%s')
+
+    def execute(self, sql, params=()):
+        conn = _conn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            cur.execute(self._sql(sql), params)
+            if sql.lstrip()[:6].upper() == 'SELECT':
+                conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return cur
+
+    def executemany(self, sql, seq):
+        conn = _conn()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            cur.executemany(self._sql(sql), seq)
+        except Exception:
+            conn.rollback()
+            raise
+        return cur
+
+    def executescript(self, script):
+        conn = _conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(script)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def commit(self):
+        _conn().commit()
+
+    def rollback(self):
+        _conn().rollback()
+
+
+db = PgDB()
+
+
+def migrate_from_sqlite():
+    """把历史 SQLite 数据（server/data.db）一次性迁移到 PostgreSQL。
+    仅当 PG 中还没有用户/角色数据时执行，重复启动不会重复写入。"""
+    import sqlite3
+
+    if not DB_PATH.exists():
+        return
+    if db.execute('SELECT 1 FROM users LIMIT 1').fetchone() or \
+            db.execute('SELECT 1 FROM roles LIMIT 1').fetchone():
+        return
+    src = sqlite3.connect(str(DB_PATH))
+    src.row_factory = sqlite3.Row
+    moved = {}
+    try:
+        users = src.execute(
+            "SELECT username, pass_hash, COALESCE(display_name,'') AS display_name, "
+            "COALESCE(is_admin,0) AS is_admin, COALESCE(role_key,'staff') AS role_key "
+            "FROM users").fetchall()
+        for r in users:
+            db.execute('INSERT INTO users(username, pass_hash, display_name, is_admin, role_key) '
+                       'VALUES(?,?,?,?,?) ON CONFLICT(username) DO NOTHING',
+                       (r['username'], r['pass_hash'], r['display_name'],
+                        r['is_admin'], r['role_key']))
+        moved['users'] = len(users)
+
+        roles = src.execute('SELECT key, name, is_system, perms, field_perms, data_scope '
+                            'FROM roles').fetchall()
+        for r in roles:
+            db.execute('INSERT INTO roles(key, name, is_system, perms, field_perms, data_scope) '
+                       'VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO NOTHING',
+                       (r['key'], r['name'], r['is_system'], r['perms'],
+                        r['field_perms'], r['data_scope']))
+        moved['roles'] = len(roles)
+
+        rows = src.execute('SELECT rid, payload, updated_by, updated_at FROM rows').fetchall()
+        for r in rows:
+            db.execute('INSERT INTO rows(rid, payload, updated_by, updated_at) VALUES(?,?,?,?) '
+                       'ON CONFLICT(rid) DO NOTHING',
+                       (r['rid'], r['payload'], r['updated_by'], r['updated_at']))
+        moved['rows'] = len(rows)
+
+        deleted = src.execute('SELECT rid, ts FROM deleted').fetchall()
+        for r in deleted:
+            db.execute('INSERT INTO deleted(rid, ts) VALUES(?,?) ON CONFLICT(rid) DO NOTHING',
+                       (r['rid'], r['ts']))
+        moved['deleted'] = len(deleted)
+
+        sessions = src.execute('SELECT token, username, created FROM sessions').fetchall()
+        for r in sessions:
+            db.execute('INSERT INTO sessions(token, username, created) VALUES(?,?,?) '
+                       'ON CONFLICT(token) DO NOTHING',
+                       (r['token'], r['username'], r['created']))
+        moved['sessions'] = len(sessions)
+
+        logs = src.execute('SELECT id, ts, username, rid, action, field, old_value, '
+                           'new_value, allowed FROM audit_log ORDER BY id').fetchall()
+        for r in logs:
+            db.execute('INSERT INTO audit_log(id, ts, username, rid, action, field, '
+                       'old_value, new_value, allowed) VALUES(?,?,?,?,?,?,?,?,?) '
+                       'ON CONFLICT(id) DO NOTHING',
+                       (r['id'], r['ts'], r['username'], r['rid'], r['action'], r['field'],
+                        r['old_value'], r['new_value'], r['allowed']))
+        moved['audit_log'] = len(logs)
+        db.commit()
+        # 自增序列对齐历史最大 id，避免后续插入主键冲突
+        db.execute("SELECT setval(pg_get_serial_sequence('audit_log','id'), "
+                   "COALESCE((SELECT MAX(id) FROM audit_log), 1), "
+                   "EXISTS(SELECT 1 FROM audit_log))")
+        db.commit()
+        print('[migrate] SQLite -> PostgreSQL 完成：' + json.dumps(moved, ensure_ascii=False))
+    except Exception as e:
+        db.rollback()
+        print('[migrate] 迁移失败（服务继续使用 PG 空库）：' + repr(e))
+    finally:
+        src.close()
+
+
+def init_db():
+    """建表（幂等）并尝试迁移历史 SQLite 数据。"""
+    with lock:
+        db.executescript('''
+        CREATE TABLE IF NOT EXISTS users(
+          username TEXT PRIMARY KEY,
+          pass_hash TEXT NOT NULL,
+          display_name TEXT DEFAULT '',
+          is_admin INTEGER DEFAULT 0,
+          role_key TEXT DEFAULT 'staff'
+        );
+        CREATE TABLE IF NOT EXISTS rows(
+          rid TEXT PRIMARY KEY,
+          payload TEXT NOT NULL,
+          updated_by TEXT DEFAULT '',
+          updated_at DOUBLE PRECISION NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rows_ts ON rows(updated_at);
+        CREATE TABLE IF NOT EXISTS deleted(
+          rid TEXT PRIMARY KEY,
+          ts DOUBLE PRECISION NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sessions(
+          token TEXT PRIMARY KEY,
+          username TEXT NOT NULL,
+          created DOUBLE PRECISION NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS roles(
+          key TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          is_system INTEGER DEFAULT 0,
+          perms TEXT NOT NULL DEFAULT '{}',
+          field_perms TEXT NOT NULL DEFAULT '{}',
+          data_scope TEXT DEFAULT 'ALL'
+        );
+        CREATE TABLE IF NOT EXISTS audit_log(
+          id BIGSERIAL PRIMARY KEY,
+          ts DOUBLE PRECISION NOT NULL,
+          username TEXT NOT NULL,
+          rid TEXT DEFAULT '',
+          action TEXT NOT NULL,
+          field TEXT NOT NULL,
+          old_value TEXT DEFAULT '',
+          new_value TEXT DEFAULT '',
+          allowed INTEGER DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+        CREATE INDEX IF NOT EXISTS idx_deleted_ts ON deleted(ts);
+        CREATE TABLE IF NOT EXISTS daily_reports(
+          username TEXT NOT NULL,
+          rdate TEXT NOT NULL,
+          content TEXT DEFAULT '',
+          plan TEXT DEFAULT '',
+          updated_at DOUBLE PRECISION NOT NULL,
+          PRIMARY KEY(username, rdate)
+        );
+        CREATE TABLE IF NOT EXISTS bid_fs_dir(
+          rid TEXT PRIMARY KEY,
+          node_id TEXT NOT NULL,
+          path TEXT DEFAULT '',
+          created_at DOUBLE PRECISION NOT NULL
+        );
+        ''')
+        migrate_from_sqlite()
+        # 删除墓碑只用于增量同步回放，保留 90 天足够覆盖长期离线客户端，避免表无限增长
+        db.execute('DELETE FROM deleted WHERE ts < ?', (time.time() - 90 * 86400,))
+        db.commit()
+
+
+init_db()
 
 # ---------------- 权限模型 ----------------
-# 台账 35 个字段（与前端 lib/fields.js 的 F 保持一致，用于权限矩阵与字段屏蔽）
+# 台账 48 个字段（与前端 lib/fields.js 的 F 保持一致，用于权限矩阵与字段屏蔽）
 FIELD_CATALOG = [
     ('projectName', '项目名称', '项目基础'), ('bidNo', '招标编号', '项目基础'),
     ('pkg', '标段/包号', '项目基础'), ('agency', '代理机构', '项目基础'),
@@ -100,12 +264,22 @@ FIELD_CATALOG = [
     ('budget', '预算/最高限价', '金额与保证金'), ('ourPrice', '我方报价', '金额与保证金'),
     ('bondAmount', '投标保证金金额', '金额与保证金'), ('bondType', '保证金形式', '金额与保证金'),
     ('bondStatus', '投标保证金状态', '金额与保证金'),
+    ('bondBackDate', '投标保证金退回时间', '金额与保证金'),
+    ('bondIssuer', '投标保函开具行/收款单位', '金额与保证金'),
+    ('bondNo', '投标保函/凭证编号', '金额与保证金'), ('bondPayDate', '投标缴纳/开具日期', '金额与保证金'),
+    ('bondDue', '投标保函有效期', '金额与保证金'),
     ('perfAmount', '履约保证金金额', '金额与保证金'), ('perfStatus', '履约保证金状态', '金额与保证金'),
-    ('bondIssuer', '保函开具行/收款单位', '金额与保证金'),
-    ('bondNo', '保函/凭证编号', '金额与保证金'), ('bondPayDate', '缴纳/开具日期', '金额与保证金'),
-    ('bondBackDate', '退回/解保日期', '金额与保证金'), ('bondDue', '保函有效期至', '金额与保证金'),
+    ('perfBackDate', '履约保证金退回时间', '金额与保证金'),
+    ('perfIssuer', '履约保函开具行/收款单位', '金额与保证金'),
+    ('perfNo', '履约保函/凭证编号', '金额与保证金'), ('perfPayDate', '履约缴纳/开具日期', '金额与保证金'),
+    ('perfDue', '履约保函有效期', '金额与保证金'),
     ('lead', '标书负责人', '人员分工'), ('copilot', '协作人', '人员分工'),
     ('reviewer', '审核人', '人员分工'),
+    ('bidStatus', '标书状态', '标书进度'), ('bidWaitAt', '未开始时间', '标书进度'),
+    ('bidStartAt', '进行中时间', '标书进度'), ('bidEndAt', '已结束时间', '标书进度'),
+    ('bidEffort', '标书投入时间', '标书进度'),
+    ('docFee', '购买标书费', '项目开销'), ('travelFee', '差旅费', '项目开销'),
+    ('sampleFee', '样品费', '项目开销'),
     ('result', '开标结果', '开标结果'), ('winner', '中标单位', '开标结果'),
     ('winAmount', '中标金额', '开标结果'), ('rank', '我方排名', '开标结果'),
     ('noticeUrl', '中标公告链接', '开标结果'), ('remark', '备注', '开标结果')
@@ -116,13 +290,20 @@ FIELD_KEYS = [f[0] for f in FIELD_CATALOG]
 PERM_CATALOG = [
     ('view.dashboard', '首页看板', '页面'),
     ('view.manage', '投标管理', '页面'),
+    ('view.timeline', '标源总览', '页面'),
+    ('view.assign', '项目分配表', '页面'),
+    ('view.alerts', '需要处理', '页面'),
+    ('view.reports', '工作日报', '页面'),
     ('view.users', '用户管理', '页面'),
     ('view.roles', '角色与权限', '页面'),
     ('view.audit', '审计日志', '页面'),
+    ('view.files', '文件存储', '页面'),
     ('bid.edit', '台账 · 新增/编辑', '操作'),
     ('bid.delete', '台账 · 删除', '操作'),
     ('bid.import', '台账 · 导入', '操作'),
     ('bid.export', '台账 · 导出/模板', '操作'),
+    ('file.admin', '存储 · 全局管理（回收站/备份/日志）', '操作'),
+    ('report.viewOthers', '日报 · 查看其他人员数据', '操作'),
 ]
 PERM_KEYS = [p[0] for p in PERM_CATALOG]
 
@@ -144,15 +325,15 @@ SCOPES = [('ALL', '全部数据'), ('SELF', '仅本人相关（负责人/协作�
 _ALL_FIELDS_READONLY = {k: {'level': 'readonly', 'mask': 'full'} for k in FIELD_KEYS}
 
 ROLE_SEEDS = [
-    ('manager', '投标经理', {'view.dashboard': 1, 'view.manage': 1, 'view.users': 0, 'view.roles': 0,
-                             'view.audit': 1, 'bid.edit': 1, 'bid.delete': 1, 'bid.import': 1,
-                             'bid.export': 1}, {}, 'ALL'),
-    ('staff', '投标专员', {'view.dashboard': 1, 'view.manage': 1, 'view.users': 0, 'view.roles': 0,
-                           'view.audit': 0, 'bid.edit': 1, 'bid.delete': 0, 'bid.import': 1,
-                           'bid.export': 1}, {}, 'ALL'),
-    ('viewer', '只读查看', {'view.dashboard': 1, 'view.manage': 1, 'view.users': 0, 'view.roles': 0,
-                            'view.audit': 0, 'bid.edit': 0, 'bid.delete': 0, 'bid.import': 0,
-                            'bid.export': 0}, _ALL_FIELDS_READONLY, 'ALL'),
+    ('manager', '投标经理', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
+                             'view.audit': 1, 'view.files': 1, 'bid.edit': 1, 'bid.delete': 1, 'bid.import': 1,
+                             'bid.export': 1, 'file.admin': 1, 'report.viewOthers': 1}, {}, 'ALL'),
+    ('staff', '投标专员', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
+                           'view.audit': 0, 'view.files': 1, 'bid.edit': 1, 'bid.delete': 0, 'bid.import': 1,
+                           'bid.export': 1, 'file.admin': 0, 'report.viewOthers': 0}, {}, 'ALL'),
+    ('viewer', '只读查看', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
+                            'view.audit': 0, 'view.files': 1, 'bid.edit': 0, 'bid.delete': 0, 'bid.import': 0,
+                            'bid.export': 0, 'file.admin': 0, 'report.viewOthers': 0}, _ALL_FIELDS_READONLY, 'ALL'),
 ]
 
 
@@ -170,6 +351,37 @@ def seed_roles():
 
 
 seed_roles()
+
+
+def backfill_role_perms():
+    """新增页面权限时给存量角色补默认值：跟随该角色「投标管理」页的开关，一次性补齐。
+    view.files 跟随 view.manage（能进台账就能进文件存储）；file.admin 跟随 view.audit；
+    report.viewOthers 跟随 view.audit（管理属性权限，默认仅管理层可看他人日报）。"""
+    page_perms = ('view.timeline', 'view.assign', 'view.alerts', 'view.reports', 'view.files')
+    follow = {'file.admin': 'view.audit', 'report.viewOthers': 'view.audit'}
+    with lock:
+        changed = False
+        for r in db.execute('SELECT key, perms FROM roles').fetchall():
+            try:
+                perms = json.loads(r['perms'] or '{}')
+            except Exception:
+                perms = {}
+            missing = [k for k in page_perms if k not in perms]
+            for k in follow:
+                if k not in perms:
+                    missing.append(k)
+            if not missing:
+                continue
+            for k in missing:
+                perms[k] = 1 if perms.get(follow.get(k, 'view.manage')) else 0
+            db.execute('UPDATE roles SET perms=? WHERE key=?',
+                       (json.dumps(perms, ensure_ascii=False), r['key']))
+            changed = True
+        if changed:
+            db.commit()
+
+
+backfill_role_perms()
 
 
 def hash_pw(pw):
@@ -510,6 +722,11 @@ class UserIn(BaseModel):
     role_key: str = ''
 
 
+class PwdIn(BaseModel):
+    old: str = ''
+    new: str = ''
+
+
 class RoleIn(BaseModel):
     key: str = ''
     name: str = ''
@@ -556,6 +773,40 @@ def me(username: str = Depends(current_user)):
     if not u:
         raise HTTPException(401, '账号不存在')
     return {'user': user_out(u, perm_of(username))}
+
+
+@app.post('/api/me/password')
+def change_my_password(body: PwdIn, authorization: str = Header(default=''),
+                       username: str = Depends(current_user)):
+    """个人中心：自助重置密码。校验旧密码 → 更新 → 注销其它登录会话（保留当前）。"""
+    old, new = body.old or '', body.new or ''
+    new = new.strip()
+    if not new:
+        raise HTTPException(400, '新密码不能为空')
+    if len(new) < 6:
+        raise HTTPException(400, '新密码至少 6 位')
+    if len(new) > 64:
+        raise HTTPException(400, '新密码最长 64 位')
+    if not old:
+        raise HTTPException(400, '请输入原密码')
+    if old.strip() == new:
+        raise HTTPException(400, '新密码不能与原密码相同')
+    with lock:
+        u = db.execute('SELECT pass_hash, display_name, is_admin FROM users WHERE username=?',
+                       (username,)).fetchone()
+        if not u:
+            raise HTTPException(404, '账号不存在')
+        if u['pass_hash'] != hash_pw(old):
+            raise HTTPException(400, '原密码不正确')
+        db.execute('UPDATE users SET pass_hash=? WHERE username=?', (hash_pw(new), username))
+        token = authorization[7:].strip() if authorization.startswith('Bearer ') else ''
+        db.execute('DELETE FROM sessions WHERE username=? AND token<>?', (username, token))
+        audit_write([(username, username, 'password', 'password', '', '已重置', True)])
+        db.commit()
+    # 回写 users.json：否则服务重启时 sync_users() 会用旧密码覆盖
+    upsert_file_user(username, password=new, display_name=u['display_name'] or username,
+                     is_admin=bool(u['is_admin']))
+    return {'ok': True}
 
 
 @app.get('/api/perm/catalog')
@@ -678,6 +929,68 @@ def staff_list(q: str = '', username: str = Depends(current_user)):
                       for r in rows]}
 
 
+# ---------------- 工作日报 ----------------
+class ReportIn(BaseModel):
+    user: str = ''
+    rdate: str
+    content: str = ''
+    plan: str = ''
+
+
+def _is_admin(username):
+    with lock:
+        r = db.execute('SELECT is_admin FROM users WHERE username=?', (username,)).fetchone()
+    return bool(r and r['is_admin'])
+
+
+@app.get('/api/reports')
+def reports_list(user: str = '', ym: str = '', username: str = Depends(current_user)):
+    """某人某年/某月的工作日报（view.reports 页面权限；user 缺省 = 自己）。
+    ym 传 '2026' 取整年、'2026-11' 取当月，缺省取全部。
+    查看他人日报需要 report.viewOthers 权限（管理员恒可）。"""
+    need(username, 'view.reports', '无工作日报查看权限')
+    target = (user or username).strip()
+    if target != username and not _is_admin(username):
+        need(username, 'report.viewOthers', '无查看其他人员日报的权限')
+    prefix = ym.strip()
+    with lock:
+        u = db.execute('SELECT * FROM users WHERE username=?', (target,)).fetchone()
+        if not u:
+            raise HTTPException(404, '账号不存在')
+        if prefix:
+            rows = db.execute('SELECT rdate, content, plan, updated_at FROM daily_reports '
+                              'WHERE username=? AND rdate LIKE ? ORDER BY rdate',
+                              (target, prefix + '%')).fetchall()
+        else:
+            rows = db.execute('SELECT rdate, content, plan, updated_at FROM daily_reports '
+                              'WHERE username=? ORDER BY rdate', (target,)).fetchall()
+    return {'user': user_out(u, perm_of(target)),
+            'reports': [{'rdate': r['rdate'], 'content': r['content'] or '',
+                         'plan': r['plan'] or '', 'updatedAt': r['updated_at']} for r in rows]}
+
+
+@app.put('/api/reports')
+def report_save(body: ReportIn, username: str = Depends(current_user)):
+    """填写/修改某天的工作日报；只能写自己的（管理员可代写），且不允许写未来日期。"""
+    need(username, 'view.reports', '无工作日报权限')
+    target = (body.user or username).strip()
+    if target != username and not _is_admin(username):
+        raise HTTPException(403, '只能填写自己的日报')
+    try:
+        d = date.fromisoformat(body.rdate)
+    except Exception:
+        raise HTTPException(400, '日期格式应为 YYYY-MM-DD')
+    if d > date.today():
+        raise HTTPException(400, '不能填写未来日期的日报')
+    with lock:
+        db.execute('INSERT INTO daily_reports(username, rdate, content, plan, updated_at) '
+                   'VALUES(?,?,?,?,?) ON CONFLICT(username, rdate) DO UPDATE SET '
+                   'content=EXCLUDED.content, plan=EXCLUDED.plan, updated_at=EXCLUDED.updated_at',
+                   (target, body.rdate, body.content.strip(), body.plan.strip(), time.time()))
+        db.commit()
+    return {'ok': True, 'rdate': body.rdate}
+
+
 @app.post('/api/users')
 def create_user(body: UserIn, admin: str = Depends(require_admin)):
     name = body.username.strip()
@@ -760,30 +1073,149 @@ def bootstrap(username: str = Depends(current_user)):
     return {'rows': rows, 'ts': time.time(), 'fresh': fresh}
 
 
+# ---------------- 标书状态流转 ----------------
+# 未开始(0) → 进行中(1) → 已结束(2)：员工只能向前推进，回退仅管理员
+BID_RANK = {'未开始': 0, '进行中': 1, '已结束': 2}
+
+
+def bid_rank(v):
+    return BID_RANK.get(str(v or '').strip(), 0)
+
+
+def apply_bid_status(payload, old, is_admin):
+    """写入状态切换时间点，并拦截非管理员的回退。
+    返回 (payload, err)；err 非空时调用方应拒绝落库。
+    · 进行中 → 记录 bidStartAt（已有则保留）
+    · 已结束 → 记录 bidEndAt（缺开始时间则一并补齐）
+    · 回退到未开始 → 记录 bidWaitAt 并清空后续时间点"""
+    new = str(payload.get('bidStatus') or '').strip()
+    if not new:
+        return payload, None
+    if new not in BID_RANK:
+        new = '未开始'
+        payload['bidStatus'] = new
+    prev = str((old or {}).get('bidStatus') or '').strip()
+    if new == prev:
+        return payload, None
+    if prev and bid_rank(new) < bid_rank(prev) and not is_admin:
+        return payload, '标书状态不可回退（仅管理员可修改）'
+    today = date.today().isoformat()
+    if new == '进行中':
+        if not payload.get('bidStartAt'):
+            payload['bidStartAt'] = today
+        payload['bidEndAt'] = ''
+    elif new == '已结束':
+        payload['bidEndAt'] = today
+        if not payload.get('bidStartAt'):
+            payload['bidStartAt'] = today
+    else:
+        payload['bidWaitAt'] = today
+        payload['bidStartAt'] = ''
+        payload['bidEndAt'] = ''
+    return payload, None
+
+
+# ---------------- 投标项目文件目录（bidfile/年/月/项目名） ----------------
+BID_DIR_ROOT = 'bidfile'
+
+
+def bid_dir_segs(payload):
+    """投标行 → 存储根目录下的目录段：bidfile / 开标年 / 开标月 / 项目名。
+    开标时间缺失时用当天兜底（正常行开标时间是必填）。"""
+    t = str((payload or {}).get('openTime') or '').strip()
+    if len(t) >= 7 and t[4] == '-' and t[5:7].isdigit():
+        y, m = t[:4], t[5:7]
+    else:
+        d = date.today()
+        y, m = '%04d' % d.year, '%02d' % d.month
+    name = str((payload or {}).get('projectName') or '').strip() or '未命名项目'
+    return [BID_DIR_ROOT, y, m, name]
+
+
+def bid_upload_roles():
+    """项目目录的协作角色：能进文件存储 + 能编辑台账 → 给上传/查看/改名/覆盖；
+    另有删除台账权限的角色再给删除。返回 [(role_key, allow_mask)]。"""
+    out = []
+    for r in db.execute('SELECT key, perms FROM roles').fetchall():
+        try:
+            perms = json.loads(r['perms'] or '{}')
+        except Exception:
+            perms = {}
+        if not perms.get('view.files') or not perms.get('bid.edit'):
+            continue
+        allow = fs_core.OP.UPLOAD | fs_core.OP.VIEW | fs_core.OP.MODIFY | fs_core.OP.OVERWRITE
+        if perms.get('bid.delete'):
+            allow |= fs_core.OP.DELETE
+        out.append((r['key'], allow))
+    return out
+
+
+def ensure_bid_dir(rid, payload, who):
+    """确保投标项目的文件目录存在（幂等），项目改名时同步目录名。
+    调用方须持有 lock；返回 (node_id, 路径)。失败由调用方兜底，不阻断台账保存。"""
+    segs = bid_dir_segs(payload)
+    want = fs_core.safe_name(segs[-1])
+    m = db.execute('SELECT * FROM bid_fs_dir WHERE rid=?', (rid,)).fetchone()
+    if m:
+        node = fs_core.get_alive(m['node_id'])
+        if node:
+            if node['name'] != want:
+                try:
+                    fs_core.do_rename(node['id'], want, who)   # 同名冲突则保留旧目录名
+                except Exception:
+                    pass
+            path = fs_core.path_of(node['id'])
+            if path != (m['path'] or ''):
+                db.execute('UPDATE bid_fs_dir SET path=? WHERE rid=?', (path, rid))
+            return node['id'], path
+    node_id = fs_core.ensure_path(segs, who)
+    for role, allow in bid_upload_roles():
+        fs_core.grant_role(node_id, role, allow, who)
+    fs_core.fs_log(who, 'mkdir', fs_core.get_node(node_id), target='投标项目目录（自动创建）')
+    path = fs_core.path_of(node_id)
+    db.execute('INSERT INTO bid_fs_dir(rid, node_id, path, created_at) VALUES(?,?,?,?) '
+               'ON CONFLICT(rid) DO UPDATE SET node_id=excluded.node_id, path=excluded.path',
+               (rid, node_id, path, time.time()))
+    return node_id, path
+
+
 @app.put('/api/rows/{rid}')
 def upsert_row(rid: str, body: dict, username: str = Depends(current_user)):
     p = perm_of(username)
     need(username, 'bid.edit', '无台账新增/编辑权限')
-    old = old_payload(rid)
-    payload, rejects = guard_in(rid, clean_payload(body), p['fieldPerms'])
-    if rejects:
-        # 越权写入：不落库，记审计并要求重新登录前先修正请求
-        with lock:
+    ts = time.time()
+    # 读旧值 → 合并 → 落库放在同一把锁内：两个用户同时编辑同一行的不同字段时不会互相覆盖
+    with lock:
+        old = old_payload(rid)
+        payload, rejects = guard_in(rid, clean_payload(body), p['fieldPerms'])
+        if rejects:
+            # 越权写入：不落库，记审计并要求重新登录前先修正请求
             audit_write([(username, rid, 'reject', k, ov, nv, False)
                          for k, ov, nv, lv in rejects])
             db.commit()
-        labels = '、'.join(FIELD_LABELS.get(k, k) for k, _, _, _ in rejects)
-        raise HTTPException(403, '无权限修改字段：' + labels)
-    if p['dataScope'] == 'SELF' and not row_in_scope(payload, 'SELF', self_names(username)):
-        raise HTTPException(403, '无权操作该数据（数据范围：仅本人相关）')
-    ts = time.time()
-    with lock:
+            labels = '、'.join(FIELD_LABELS.get(k, k) for k, _, _, _ in rejects)
+            raise HTTPException(403, '无权限修改字段：' + labels)
+        # 标书状态：自动写状态时间点 + 拦截员工回退
+        payload, bid_err = apply_bid_status(payload, old, p['roleKey'] == 'admin')
+        if bid_err:
+            audit_write([(username, rid, 'reject', 'bidStatus',
+                          (old or {}).get('bidStatus', ''), payload.get('bidStatus', ''), False)])
+            db.commit()
+            raise HTTPException(403, bid_err)
+        if p['dataScope'] == 'SELF' and not row_in_scope(payload, 'SELF', self_names(username)):
+            raise HTTPException(403, '无权操作该数据（数据范围：仅本人相关）')
         db.execute(
             'INSERT INTO rows(rid, payload, updated_by, updated_at) VALUES(?,?,?,?) '
             'ON CONFLICT(rid) DO UPDATE SET payload=excluded.payload, '
             'updated_by=excluded.updated_by, updated_at=excluded.updated_at',
             (rid, json.dumps(payload, ensure_ascii=False), username, ts))
         db.execute('DELETE FROM deleted WHERE rid=?', (rid,))
+        # 新建标段 / 项目改名时，同步在文件存储建（或改）项目目录；失败不影响台账保存
+        if old is None or str((old or {}).get('projectName') or '') != str(payload.get('projectName') or ''):
+            try:
+                ensure_bid_dir(rid, payload, username)
+            except Exception:
+                pass
         audit_write(audit_diff(username, rid, old or {}, payload,
                                'create' if old is None else 'update'))
         db.commit()
@@ -795,11 +1227,11 @@ def upsert_row(rid: str, body: dict, username: str = Depends(current_user)):
 def delete_row(rid: str, username: str = Depends(current_user)):
     p = perm_of(username)
     need(username, 'bid.delete', '无台账删除权限')
-    old = old_payload(rid)
-    if p['dataScope'] == 'SELF' and old is not None and not row_in_scope(old, 'SELF', self_names(username)):
-        raise HTTPException(403, '无权操作该数据（数据范围：仅本人相关）')
     ts = time.time()
     with lock:
+        old = old_payload(rid)
+        if p['dataScope'] == 'SELF' and old is not None and not row_in_scope(old, 'SELF', self_names(username)):
+            raise HTTPException(403, '无权操作该数据（数据范围：仅本人相关）')
         old = old or {}
         db.execute('DELETE FROM rows WHERE rid=?', (rid,))
         db.execute('INSERT INTO deleted(rid, ts) VALUES(?,?) '
@@ -808,6 +1240,34 @@ def delete_row(rid: str, username: str = Depends(current_user)):
                       old.get('projectName', ''), '', True)])
         db.commit()
     return {'ok': True, 'ts': ts}
+
+
+@app.get('/api/bid-dir')
+def bid_dir(rid: str = '', username: str = Depends(current_user)):
+    """投标项目对应的文件目录（bidfile/开标年/开标月/项目名）：
+    不存在则按规则创建，返回目录节点 id、路径与文件数（供台账「上传文件」使用）。"""
+    need(username, 'view.manage', '无投标管理查看权限')
+    rid = str(rid or '').strip()
+    if not rid:
+        raise HTTPException(400, '缺少标段 id')
+    with lock:
+        row = db.execute('SELECT payload FROM rows WHERE rid=?', (rid,)).fetchone()
+        if not row:
+            raise HTTPException(404, '标段不存在')
+        payload = json.loads(row['payload'])
+        p = perm_of(username)
+        if p['dataScope'] == 'SELF' and not row_in_scope(payload, 'SELF', self_names(username)):
+            raise HTTPException(403, '无权查看该数据（数据范围：仅本人相关）')
+        try:
+            node_id, path = ensure_bid_dir(rid, payload, username)
+            cnt = db.execute("SELECT COUNT(*) c FROM fs_node WHERE parent_id=? AND kind='file' "
+                             "AND deleted=0", (node_id,)).fetchone()['c']
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(400, '创建项目目录失败：' + str(e))
+    return {'rid': rid, 'nodeId': node_id, 'path': path, 'files': int(cnt or 0),
+            'name': payload.get('projectName', '')}
 
 
 @app.post('/api/clear')
@@ -866,9 +1326,16 @@ def merge(body: MergeIn, username: str = Depends(current_user)):
                 if p['dataScope'] == 'SELF' and not row_in_scope(payload, 'SELF', names):
                     skip += 1
                     continue
+                prev_status = payload.get('bidStatus', '')
+                # 导入不覆盖「回退」：非管理员带入的更低状态直接忽略
+                new_st = str(r.get('bidStatus') or '').strip()
+                if new_st and bid_rank(new_st) < bid_rank(prev_status) and p['roleKey'] != 'admin':
+                    r = {kk: vv for kk, vv in r.items() if kk != 'bidStatus'}
                 for kk, vv in r.items():
                     if vv != '' and vv is not None and field_level(fp, kk) == 'writable':
                         payload[kk] = vv
+                payload, _ = apply_bid_status(payload, {'bidStatus': prev_status},
+                                              p['roleKey'] == 'admin')
                 db.execute('UPDATE rows SET payload=?, updated_by=?, updated_at=? WHERE rid=?',
                            (json.dumps(payload, ensure_ascii=False), username, ts, old['rid']))
                 upd += 1
@@ -878,9 +1345,14 @@ def merge(body: MergeIn, username: str = Depends(current_user)):
                 if p['dataScope'] == 'SELF' and not row_in_scope(r, 'SELF', names):
                     skip += 1
                     continue
+                r, _ = apply_bid_status(r, None, p['roleKey'] == 'admin')
                 rid = str(raw.get('id') or uuid.uuid4().hex)
                 db.execute('INSERT INTO rows(rid, payload, updated_by, updated_at) VALUES(?,?,?,?)',
                            (rid, json.dumps(r, ensure_ascii=False), username, ts))
+                try:
+                    ensure_bid_dir(rid, r, username)      # 导入新增也要有项目文件目录
+                except Exception:
+                    pass
                 idx[k] = {'rid': rid, 'payload': json.dumps(r, ensure_ascii=False)}
                 add += 1
                 changed_ids.append(rid)
@@ -929,6 +1401,16 @@ def list_audit(limit: int = 100, rid: str = '', username: str = Depends(current_
         for r in rows]}
 
 
+# ---------------- 文件存储模块（/api/fs/*） ----------------
+# 必须在 SPA 兜底路由 /{full_path:path} 之前注册，否则会被吞掉
+from . import fs as fs_core                                            # noqa: E402
+from . import fs_api as fs_api_mod                                     # noqa: E402
+
+fs_core.init_fs(db, lock, perm_of)          # 注入依赖 + 创建存储目录 + 启动清理线程
+fs_core.init_tables(db)                     # 幂等建表（老库可直接升级）
+app.include_router(fs_api_mod.build_router(current_user))
+
+
 # 前端静态托管（frontend/dist，Vite 构建产物）+ SPA history 路由回退：
 # 生产环境由 Nginx 托管，此兜底仅为直连 8000 端口联调时刷新 /manage、/users 不 404。
 from fastapi.responses import FileResponse
@@ -938,8 +1420,14 @@ DIST = ROOT / 'frontend' / 'dist'
 
 @app.get('/{full_path:path}', include_in_schema=False)
 def spa(full_path: str):
+    # index.html 不缓存：保证发版后浏览器立即拿到新 hash 的资源；
+    # 带 hash 的静态资源仍走浏览器默认缓存（文件名变了自然失效）。
+    # 未知 /api/* 路径（如后端未重启缺新路由时）返回 JSON 404，
+    # 避免前端把 index.html 当 JSON 解析报「Unexpected token <!DOCTYPE」。
+    if full_path.startswith('api/') or full_path == 'api':
+        raise HTTPException(404, '接口不存在：/' + full_path)
     if full_path:
         f = (DIST / full_path).resolve()
         if f.is_file() and str(f).startswith(str(DIST)):
             return FileResponse(f)
-    return FileResponse(DIST / 'index.html')
+    return FileResponse(DIST / 'index.html', headers={'Cache-Control': 'no-cache'})

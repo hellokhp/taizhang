@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import NavTabs from './components/NavTabs.vue'
 import EditDialog from './components/EditDialog.vue'
+import DetailDialog from './components/DetailDialog.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import ToastBox from './components/ToastBox.vue'
 import LoginView from './views/LoginView.vue'
@@ -11,7 +12,7 @@ import { auth, logout } from './stores/auth'
 import { um } from './stores/users'
 
 const route = useRoute();
-const pageTitle = computed(() => ({'/':'首页看板','/manage':'投标管理','/users':'用户管理','/roles':'角色权限','/audit':'审计日志'}[route.path] || ''));
+const pageTitle = computed(() => ({'/':'首页看板','/manage':'投标管理','/timeline':'标源总览','/assign':'项目分配表','/alerts':'需要处理','/files':'文件存储','/users':'用户管理','/roles':'角色权限','/audit':'审计日志','/reports':'工作日报','/profile':'个人中心'}[route.path] || ''));
 
 function onKey(e){
   if(e.key === 'Escape'){
@@ -49,7 +50,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
         <span class="page-title">{{ pageTitle }}</span>
         <div class="spacer"></div>
         <template v-if="auth.user">
-          <span class="user-chip">
+          <span class="user-chip" role="button" title="个人中心" @click="$router.push('/profile')">
             <span class="avatar">{{ (auth.user.displayName || '?').charAt(0) }}</span>
             {{ auth.user.displayName }}
             <em v-if="auth.user.isAdmin">管理员</em>
@@ -68,6 +69,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
     </div>
   </div>
   <EditDialog />
+  <DetailDialog />
   <ImportDialog />
   <ToastBox />
 </template>

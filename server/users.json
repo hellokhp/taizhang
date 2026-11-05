@@ -4,5 +4,70 @@
     "password": "123456",
     "display_name": "管理员",
     "is_admin": true
+  },
+  "康雅爽": {
+    "password": "123456",
+    "display_name": "康雅爽",
+    "is_admin": false
+  },
+  "李小利": {
+    "password": "123456",
+    "display_name": "李小利",
+    "is_admin": false
+  },
+  "刘明月": {
+    "password": "123456",
+    "display_name": "刘明月",
+    "is_admin": false
+  },
+  "启红": {
+    "password": "123456",
+    "display_name": "启红",
+    "is_admin": false
+  },
+  "金丽": {
+    "password": "123456",
+    "display_name": "金丽",
+    "is_admin": false
+  },
+  "樊小芳": {
+    "password": "123456",
+    "display_name": "樊小芳",
+    "is_admin": false
+  },
+  "李明杰": {
+    "password": "123456",
+    "display_name": "李明杰",
+    "is_admin": false
+  },
+  "王丹": {
+    "password": "123456",
+    "display_name": "王丹",
+    "is_admin": false
+  },
+  "胡贞贞": {
+    "password": "123456",
+    "display_name": "胡贞贞",
+    "is_admin": false
+  },
+  "李芳": {
+    "password": "123456",
+    "display_name": "李芳",
+    "is_admin": false
+  },
+  "郭世正": {
+    "password": "123456",
+    "display_name": "郭世正",
+    "is_admin": false
+  },
+  "李锦": {
+    "password": "123456",
+    "display_name": "李锦",
+    "is_admin": false
+  },
+  "田硕": {
+    "password": "123456",
+    "display_name": "田硕",
+    "is_admin": false
   }
 }

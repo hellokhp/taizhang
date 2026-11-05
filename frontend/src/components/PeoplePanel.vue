@@ -1,6 +1,17 @@
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { S } from '../stores/bid'
+import { can } from '../stores/perm'
+import { timelineQuery } from '../lib/jump'
+
+/* 点人名 → 标源总览，带上当前区间与「负责人 = 该人」筛选 */
+const router = useRouter();
+const canJump = computed(() => can('view.timeline'));
+function jump(name){
+  if(!canJump.value || !name || name === '未指定') return;
+  router.push({path:'/timeline', query: timelineQuery({lead: name})});
+}
 
 const list = computed(() => {
   const map = new Map();
@@ -23,7 +34,7 @@ const rate = v => v.n ? Math.round(v.w / v.n * 100) : 0;
       <div class="people" v-if="list.length">
         <div class="p-row" v-for="(p, i) in list" :key="p.name">
           <span class="rank">{{ i + 1 }}</span>
-          <div class="nm" :title="p.name">{{ p.name }}</div>
+          <div class="nm" :class="{jump: canJump}" :title="canJump ? '在标源总览中查看 ' + p.name + ' 的标段' : p.name" @click="jump(p.name)">{{ p.name }}</div>
           <div class="p-track" :title="p.name + '：' + p.n + ' 标 · 中标 ' + p.w">
             <i :style="{width: p.n/max*100 + '%', background:'#C6D5E7'}">
               <i :style="{display:'block', height:'100%', width: (p.n ? p.w/p.n*100 : 0) + '%', background:'var(--win)'}"></i>

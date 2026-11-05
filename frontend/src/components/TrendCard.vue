@@ -39,15 +39,26 @@ function onMove(e){
 const wrap = ref(null);
 const W = ref(0);
 let ro = null;
+/* 图表高度随视口高度缩放：小屏 252px，2K/4K 最高 400px，充分填充大屏纵向空间 */
+const H = ref(252);
+function syncH(){
+  const vh = window.innerHeight || 800;
+  H.value = Math.max(252, Math.min(400, Math.round(vh * 0.25)));
+}
 onMounted(() => {
+  syncH();
+  window.addEventListener('resize', syncH);
   ro = new ResizeObserver(es => { W.value = Math.round(es[0].target.getBoundingClientRect().width); });
   ro.observe(wrap.value);
 });
-onBeforeUnmount(() => { if(ro) ro.disconnect(); });
+onBeforeUnmount(() => {
+  if(ro) ro.disconnect();
+  window.removeEventListener('resize', syncH);
+});
 
 /* ============ 几何 ============ */
-const H = 252, PT = 22, PB = 30, PL = 44, PR = 16;
-const innerH = H - PT - PB;
+const PT = 22, PB = 30, PL = 44, PR = 16;
+const innerH = computed(() => H.value - PT - PB);
 const mw = computed(() => Math.max(320, W.value || 720));
 const innerW = computed(() => mw.value - PL - PR);
 const band = computed(() => innerW.value / n.value);
@@ -58,7 +69,7 @@ function niceMax(v){
   return step * 4;
 }
 const maxV = computed(() => niceMax(Math.max(1, ...trend.value.ds.map(d => Math.max(d.n, d.w)))));
-const yOfV = v => PT + innerH - (v / maxV.value) * innerH;
+const yOfV = v => PT + innerH.value - (v / maxV.value) * innerH.value;
 const cxOf = i => PL + band.value * (i + 0.5);
 const ticks = computed(() => [0,1,2,3,4].map(k => ({ v: maxV.value * k / 4, y: yOfV(maxV.value * k / 4) })));
 
@@ -77,8 +88,8 @@ const ds = computed(() => trend.value.ds.map((d, i) => {
   const bars = {};
   keys.forEach((k, j) => {
     const v = d[k];
-    const hh = (v / maxV.value) * innerH;
-    bars[k] = { x: x0 + j * (bw.value + gap.value), y: hh < 2 ? PT + innerH - 2 : yOfV(v), hh: Math.max(2, hh) };
+    const hh = (v / maxV.value) * innerH.value;
+    bars[k] = { x: x0 + j * (bw.value + gap.value), y: hh < 2 ? PT + innerH.value - 2 : yOfV(v), hh: Math.max(2, hh) };
   });
   return { ...d, i, cx: cxOf(i), bars };
 }));
@@ -86,7 +97,7 @@ const ds = computed(() => trend.value.ds.map((d, i) => {
 const lineN = computed(() => ds.value.map(d => (d.cx + ',' + yOfV(d.n))).join(' '));
 const lineW = computed(() => ds.value.map(d => (d.cx + ',' + yOfV(d.w))).join(' '));
 const areaN = computed(() => {
-  const base = PT + innerH;
+  const base = PT + innerH.value;
   const pts = ds.value.map(d => (d.cx + ',' + yOfV(d.n))).join(' L ');
   return `M ${ds.value[0].cx},${base} L ${pts} L ${ds.value[ds.value.length - 1].cx},${base} Z`;
 });

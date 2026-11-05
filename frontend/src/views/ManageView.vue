@@ -1,11 +1,83 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import BidTable from '../components/BidTable.vue'
-import { ST, leadOpts, methodOpts, filteredCnt, pageCnt, pagedRows,
+import TableConfigDialog from '../components/TableConfigDialog.vue'
+import BidUploadDialog from '../components/BidUploadDialog.vue'
+import { ST, S, leadOpts, methodOpts, filteredCnt, pageCnt, pagedRows,
   resetFilter, pickImportFile, exportXlsx, exportTemplate, openEdit,
-  setQuickMonths, setPage, setPageSize, selPageAll, batchDelete } from '../stores/bid'
+  setQuickMonths, setPage, setPageSize, selPageAll, batchDelete,
+  openCfg, setRowHeight, setOnlyNoTime, setFund } from '../stores/bid'
 import { RESULT_OPTS } from '../lib/fields'
+import { fundLabel } from '../lib/fund'
 import { can } from '../stores/perm'
+
+const route = useRoute();
+
+/* 来自标源总览「另有 N 条未填…」的跳转：只列这批未填统计口径时间的标段
+   来自看板「资金状态」叶子（投标/履约保证金、三项开销）的跳转：只列该口径下的标段 */
+function applyQuery(){
+  const q = route.query;
+  if(String(q.noTime || '') === '1'){
+    ST.f.kw = String(q.kw || '');
+    ST.f.lead = String(q.lead || '');
+    ST.f.result = String(q.result || '');
+    ST.f.method = String(q.method || '');
+    setOnlyNoTime(true);
+    return;
+  }
+  const code = String(q.fund || '');
+  if(!code) return;
+  ST.f.kw = String(q.kw || '');
+  ST.f.lead = String(q.lead || '');
+  ST.f.result = String(q.result || '');
+  ST.f.method = String(q.method || '');
+  /* 日期区间跟随饼图的「本期 / 全部」口径：本期 = 看板统计区间的首末日，全部 = 不限日期 */
+  if(String(q.sc || '') === 'cur' && S.value.ymFrom && S.value.ymTo){
+    const [y, m] = S.value.ymTo.split('-').map(Number);
+    ST.dateFrom = S.value.ymFrom + '-01';
+    ST.dateTo = S.value.ymTo + '-' + String(new Date(y, m, 0).getDate()).padStart(2, '0');
+  }else{
+    ST.dateFrom = '';
+    ST.dateTo = '';
+  }
+  setFund(code);
+}
+onMounted(applyQuery);
+watch(() => route.query, applyQuery);
+onUnmounted(() => {
+  if(ST.onlyNoTime) setOnlyNoTime(false);
+  if(ST.fund) setFund('');
+});
+
+const fundLbl = computed(() => fundLabel(ST.fund));
+const basisWord = computed(() => ST.basis === 'deadline' ? '交标' : '开标');
+
+/* 当前生效的命名配置（默认视图时为空） */
+const activeCfgName = computed(() => {
+  const c = ST.tableCfg.list.find(x => x.id === ST.tableCfg.activeId);
+  return c ? c.name : '';
+});
+
+/* 行高拖拽：上下拖动工具栏手柄，实时调整全部行高 */
+let rhDrag = null;
+function startRowDrag(e){
+  e.preventDefault();
+  rhDrag = {y:e.clientY, h:ST.tableCfg.rowH};
+  document.body.style.cursor = 'row-resize';
+  document.body.style.userSelect = 'none';
+  window.addEventListener('pointermove', onRowDrag);
+  window.addEventListener('pointerup', endRowDrag, {once:true});
+}
+function onRowDrag(e){
+  if(rhDrag) setRowHeight(rhDrag.h + (e.clientY - rhDrag.y));
+}
+function endRowDrag(){
+  rhDrag = null;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  window.removeEventListener('pointermove', onRowDrag);
+}
 
 /* 分页显示窗口：当前页前2后2 + 两端省略 */
 const visiblePages = computed(() => {
@@ -36,6 +108,7 @@ const visiblePages = computed(() => {
       <select v-model="ST.f.result">
         <option value="">全部结果</option>
         <option v-for="v in RESULT_OPTS" :key="v" :value="v">{{ v }}</option>
+        <option value="未中标|废标|流标">未中标 / 废流标</option>
       </select>
       <select v-model="ST.f.method">
         <option value="">全部招标方式</option>
@@ -56,7 +129,17 @@ const visiblePages = computed(() => {
 
       <span class="tb-sep"></span>
       <button class="btn ghost" @click="resetFilter()">重置筛选</button>
+      <button v-if="ST.onlyNoTime" class="chip on no-time-chip"
+        :title="'当前仅列出未填' + basisWord + '时间的标段，日期区间在此模式下不生效；点击退出'"
+        @click="setOnlyNoTime(false)">仅看未填{{ basisWord }}时间 ✕</button>
+      <button v-if="ST.fund" class="chip on no-time-chip fund-chip"
+        :title="'当前仅列出「' + fundLbl + '」口径下的标段（来自看板资金状态），可再叠加其它筛选；点击退出'"
+        @click="setFund('')">{{ fundLbl }} ✕</button>
       <span class="cnt">{{ filteredCnt }} 条</span>
+
+      <span class="tb-sep"></span>
+      <button class="btn ghost" @click="openCfg()">列设置<template v-if="activeCfgName"> · {{ activeCfgName }}</template></button>
+      <span class="rowh-grip" title="上下拖动调整行高" @pointerdown="startRowDrag"><i></i>行高 {{ ST.tableCfg.rowH }}px</span>
 
       <span class="tb-sep"></span>
       <button v-if="can('bid.import')" class="btn" @click="pickImportFile()">导入台账</button>
@@ -106,4 +189,6 @@ const visiblePages = computed(() => {
       </span>
     </div>
   </div>
+  <TableConfigDialog />
+  <BidUploadDialog />
 </template>

@@ -1,11 +1,17 @@
 <script setup>
 import { reactive, ref, computed, watch, onUnmounted } from 'vue'
 import { ST, dlg, closeDlg, upsertRow, removeRow, toast, getDraft, setDraft, clearDraft, staff } from '../stores/bid'
-import { S0, FORM_ITEMS } from '../lib/fields'
+import { S0, FORM_ITEMS, bidStatusLocked, stampBidStatus } from '../lib/fields'
 import { can, canSee, canWrite, fieldMode } from '../stores/perm'
+import { auth } from '../stores/auth'
 
 const canEdit = computed(() => can('bid.edit'));
 const canDel = computed(() => can('bid.delete'));
+const isAdmin = computed(() => !!(auth.user && auth.user.isAdmin));
+/* 标书状态的时间记录点由系统维护：表单里默认只读，管理员可修正 */
+function lockedField(f){ return f.ro && !isAdmin.value; }
+/* 非管理员只能向前推进（未开始 → 进行中 → 已结束），回退仅管理员 */
+function statusLocked(o){ return bidStatusLocked(o, draft.bidStatus, isAdmin.value); }
 /* 只读 / 脱敏 字段都会禁用编辑，标签提示对应档位 */
 function lockTag(k){ const m = fieldMode(k); return m === 'masked' ? '脱敏' : (m === 'readonly' ? '只读' : ''); }
 
@@ -33,6 +39,7 @@ const staffOpts = computed(() => {
 const draft = reactive({});
 const confirmLeave = ref(false);      // 「内容未保存」提示
 let baseSnap = '';                    // 打开时的内容快照，用于脏检查
+let statusPrev = '';                  // 上一次的标书状态（用于判断时间点是否需要写入）
 
 const dirty = computed(() => JSON.stringify(draft) !== baseSnap);
 
@@ -43,6 +50,7 @@ watch(() => dlg.open, v => {
     Object.assign(draft, S0({}), {method:'公开招标', bondType:'银行转账', bondStatus:'未缴', result:'待开标'}, r || {});
     const st = getDraft(dlg.id);      // 恢复上次未保存的草稿
     if(st) Object.assign(draft, st);
+    statusPrev = draft.bidStatus || '';
     baseSnap = JSON.stringify(draft);
     confirmLeave.value = false;
     document.addEventListener('keydown', onKey);
@@ -57,6 +65,12 @@ function onKey(e){
     if(confirmLeave.value) confirmLeave.value = false;
     else attemptClose();
   }
+}
+/* 标书状态变更：立刻补写对应状态时间点（保存时 bid.js / 后端会再兜底一次） */
+function onFieldChange(k){
+  if(k !== 'bidStatus') return;
+  stampBidStatus(draft, statusPrev);
+  statusPrev = draft.bidStatus || '';
 }
 /* 所有关闭入口（点外围 / 关闭✕ / 取消 / Esc）：有未保存内容先询问 */
 function attemptClose(){
@@ -105,14 +119,19 @@ const updatedInfo = computed(() => {
               <label>{{ it.f.l }}<b v-if="it.f.req"> *</b>
                 <em v-if="lockTag(it.f.k)" class="ro-tag" :class="{masked: fieldMode(it.f.k) === 'masked'}">{{ lockTag(it.f.k) }}</em>
               </label>
-              <select v-if="it.f.t === 'select'" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)">
+              <select v-if="it.f.t === 'select'" v-model="draft[it.f.k]"
+                :disabled="!canWrite(it.f.k) || lockedField(it.f)" @change="onFieldChange(it.f.k)">
                 <option value="">请选择</option>
-                <option v-for="o in it.f.opt" :key="o" :value="o">{{ o }}</option>
+                <option v-for="o in it.f.opt" :key="o" :value="o"
+                  :disabled="it.f.k === 'bidStatus' && statusLocked(o)">{{ o }}</option>
               </select>
-              <input v-else-if="it.f.t === 'date'" type="date" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)">
-              <input v-else-if="it.f.t === 'num'" type="number" step="0.01" placeholder="0.00" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)">
-              <textarea v-else-if="it.f.t2 === 'area'" placeholder="补充说明" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)"></textarea>
-              <input v-else type="text" :placeholder="it.f.l" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k)" :list="STAFF_KEYS.indexOf(it.f.k) >= 0 ? 'staffList' : undefined">
+              <input v-else-if="it.f.t === 'date'" type="date" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)">
+              <input v-else-if="it.f.t === 'num'" type="number" step="0.01" placeholder="0.00" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)">
+              <textarea v-else-if="it.f.t2 === 'area'" placeholder="补充说明" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)"></textarea>
+              <input v-else type="text" :placeholder="it.f.l" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)" :list="STAFF_KEYS.indexOf(it.f.k) >= 0 ? 'staffList' : undefined">
+              <div v-if="it.f.k === 'bidStatus'" class="fld-tip">
+                {{ isAdmin ? '管理员可任意调整；状态时间点自动记录，也可手动修正。' : '只能向前推进（未开始 → 进行中 → 已结束），回退状态需管理员操作。' }}
+              </div>
             </div>
           </template>
         </div>

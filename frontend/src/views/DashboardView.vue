@@ -4,13 +4,14 @@ import { ST, setQuickRange, setYmRange } from '../stores/bid'
 import { TODAY, pad, ymLabel } from '../lib/format'
 import KpiRow from '../components/KpiRow.vue'
 import TrendCard from '../components/TrendCard.vue'
-import BondPanel from '../components/BondPanel.vue'
+import FundPanel from '../components/FundPanel.vue'
 import PeoplePanel from '../components/PeoplePanel.vue'
 import AlertsPanel from '../components/AlertsPanel.vue'
 import { canAgg } from '../stores/perm'
+import { fundAllow } from '../lib/fund'
 
-/* 字段不可见 / 脱敏时，对应看板模块一并隐藏（否则只会显示 0 或算错，误导） */
-const showBond = computed(() => canAgg('bondAmount') || canAgg('bondStatus'));
+/* 资金类字段全不可见 / 全脱敏时，看板资金模块一并隐藏（否则只会显示 0，误导） */
+const showFund = computed(() => fundAllow(canAgg).length > 0);
 const showPeople = computed(() => canAgg('lead'));
 const showAlerts = computed(() => canAgg('lead') && canAgg('bondStatus'));
 
@@ -58,9 +59,9 @@ function onTo(e){ const v = e.target.value; if(v) setYmRange(ST.ymFrom, v); e.ta
 
     <KpiRow />
 
-    <div class="grid2" :class="{one: !showBond}">
+    <div class="grid2" :class="{one: !showFund}">
       <TrendCard />
-      <BondPanel v-if="showBond" />
+      <FundPanel v-if="showFund" />
     </div>
 
     <div v-if="showPeople || showAlerts" class="grid2 b" :class="{one: !(showPeople && showAlerts)}">

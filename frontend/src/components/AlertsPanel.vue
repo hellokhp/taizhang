@@ -1,49 +1,38 @@
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ST } from '../stores/bid'
-import { dd, num, fmtN } from '../lib/format'
-import { isNoBid, bondState, bondKind, shortType } from '../lib/fields'
+import { buildAlerts, sevOf } from '../lib/alerts'
+import { can, canAgg } from '../stores/perm'
 
-const alerts = computed(() => {
-  const out = [];
-  ST.rows.forEach(r => {
-    if(isNoBid(r)) return;
-    const d = dd(r.openTime);
-    if(r.bondStatus === '未缴' && r.result === '待开标'){
-      out.push({lv:2, tag:'保证金未缴', r, sub:'保证金 ' + fmtN(r.bondAmount) + ' 万未缴纳' + (d !== null ? (d < 0 ? '，开标已过 ' : d === 0 ? '，今天开标 ' : '，距开标 ' + d + ' 天') : '') + ' · ' + (r.lead || '未指定负责人')});
-    }
-    if(r.result === '待开标' && d !== null && d >= 0 && d <= 7){
-      out.push({lv:1, tag:'即将开标', r, sub:(r.openTime||'').slice(5) + ' 开标' + (d === 0 ? '（今天）' : '（' + d + ' 天后）') + ' · ' + (r.lead || '未指定负责人')});
-    }
-    if(bondState(r) === '待退' && d !== null && -d > 30){
-      out.push({lv:3, tag:'保证金逾期', r, sub:'已开标 ' + (-d) + ' 天' + (bondKind(r) === 'guar' ? '仍未解保' : '仍未退回') + ' · ' + fmtN(r.bondAmount) + ' 万'});
-    }
-    if(!r.lead || !r.bidNo || !r.openTime){
-      const miss = [!r.lead && '负责人', !r.bidNo && '招标编号', !r.openTime && '开标时间'].filter(Boolean).join('、');
-      out.push({lv:3, tag:'信息缺失', r, sub:'缺少：' + miss});
-    }
-    if(r.result === '中标' && !num(r.winAmount)){
-      out.push({lv:3, tag:'待补金额', r, sub:'已中标但未填中标金额'});
-    }
-    if(bondKind(r) === 'guar' && r.bondStatus === '已缴' && bondState(r) !== '待退'){
-      const ddue = dd(r.bondDue);
-      if(ddue !== null && ddue <= 30){
-        out.push({lv: ddue < 0 ? 2 : 3, tag: ddue < 0 ? '保函已过期' : '保函将到期', r,
-          sub: shortType(r.bondType) + '有效期至 ' + (r.bondDue||'').slice(5) + (ddue < 0 ? '（已过期 ' + (-ddue) + ' 天）' : '（' + ddue + ' 天后）') + ' · 需延期或解保'});
-      }
-    }
-  });
-  out.sort((a,b) => a.lv - b.lv);
-  return out;
-});
+const router = useRouter();
+
+/* 计算口径统一在 lib/alerts.js（详情页共用）。
+   字段不可见/脱敏时对应预警无意义，直接不出（读到的不是真实值）。 */
+const alerts = computed(() => buildAlerts(ST.rows, {
+  bid: canAgg('bidStatus'),
+  bond: canAgg('bondStatus'),
+  perf: canAgg('perfStatus'),
+  minor: true
+})
+  /* 面板只保留逾期超过 30 天的待退费，避免长期未退的存量把列表刷满；
+     完整清单见「需要处理」详情页 */
+  .filter(o => o.type !== 'refund' || o.daysPast > 30));
+
 const top = computed(() => alerts.value.slice(0,12).map(o => ({...o, name: o.r.projectName || '未命名项目'})));
 const moreCount = computed(() => Math.max(0, alerts.value.length - 12));
+/* 按视觉等级统计：标书未准备 sev=2 → 计入「紧急」（与红色标签一致） */
 const lvCount = computed(() => ({
-  1: alerts.value.filter(o => o.lv === 1).length,
-  2: alerts.value.filter(o => o.lv === 2).length,
-  3: alerts.value.filter(o => o.lv === 3).length
+  1: alerts.value.filter(o => sevOf(o) === 1).length,
+  2: alerts.value.filter(o => sevOf(o) === 2).length,
+  3: alerts.value.filter(o => sevOf(o) === 3).length
 }));
-function clsOf(lv){ return {1:'a-info', 2:'a-red', 3:'a-warn'}[lv]; }
+function clsOf(o){ return {1:'a-info', 2:'a-red', 3:'a-warn'}[sevOf(o)]; }
+/* 点「紧急 / 提醒 / 关注」直接进详情页并按该等级筛选 */
+function goLevel(lv){
+  if(!can('view.alerts')) return;
+  router.push('/alerts?lv=' + lv);
+}
 </script>
 
 <template>
@@ -51,14 +40,25 @@ function clsOf(lv){ return {1:'a-info', 2:'a-red', 3:'a-warn'}[lv]; }
     <div class="card-h">
       <h2>需要处理</h2>
       <div class="alert-sum">
-        <span class="as"><i style="background:var(--win)"></i>紧急 <b>{{ lvCount[2] }}</b></span>
-        <span class="as"><i style="background:var(--info)"></i>提醒 <b>{{ lvCount[1] }}</b></span>
-        <span class="as"><i style="background:var(--warn)"></i>关注 <b>{{ lvCount[3] }}</b></span>
+        <button class="as" :class="{go: can('view.alerts')}" :disabled="!can('view.alerts')"
+          title="含：保证金未缴、标书未准备（点击查看）" @click="goLevel(2)">
+          <i style="background:var(--win)"></i>紧急 <b>{{ lvCount[2] }}</b>
+        </button>
+        <button class="as" :class="{go: can('view.alerts')}" :disabled="!can('view.alerts')"
+          title="含：7 天内即将开标（点击查看）" @click="goLevel(1)">
+          <i style="background:var(--info)"></i>提醒 <b>{{ lvCount[1] }}</b>
+        </button>
+        <button class="as" :class="{go: can('view.alerts')}" :disabled="!can('view.alerts')"
+          title="含：信息缺失、待补金额、保函到期、待退费（点击查看）" @click="goLevel(3)">
+          <i style="background:var(--warn)"></i>关注 <b>{{ lvCount[3] }}</b>
+        </button>
+        <button v-if="can('view.alerts')" class="as-link" title="打开「需要处理」详情页，可按类型筛选与分页"
+          @click="router.push('/alerts')">全部 ›</button>
       </div>
     </div>
     <div class="card-b">
       <div class="alerts" v-if="top.length">
-        <div class="alert" v-for="(o,i) in top" :key="i" :class="clsOf(o.lv)">
+        <div class="alert" v-for="(o,i) in top" :key="i" :class="clsOf(o)">
           <span class="tag">{{ o.tag }}</span>
           <div class="body">{{ o.name }}<em>{{ o.sub }}</em></div>
         </div>
