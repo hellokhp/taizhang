@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import NavTabs from './components/NavTabs.vue'
+import logo from './assets/images/logo.png'
 import EditDialog from './components/EditDialog.vue'
 import DetailDialog from './components/DetailDialog.vue'
 import ImportDialog from './components/ImportDialog.vue'
@@ -36,7 +37,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
   <div v-else class="shell">
     <aside class="sidebar">
       <div class="side-brand">
-        <div class="mark">亚</div>
+        <img class="mark logo-img" :src="logo" alt="亚德彩投标台账">
         <div class="side-title">
           <h1>亚德彩投标台账</h1>
           <div class="sub">投标部 · 全流程协同台账</div>

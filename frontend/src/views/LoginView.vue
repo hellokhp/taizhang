@@ -5,6 +5,7 @@
 import { reactive } from 'vue'
 import { auth, login } from '../stores/auth'
 import { bootRemote, toast } from '../stores/bid'
+import logo from '../assets/images/logo.png'
 
 const fm = reactive({ username: '', password: '' });
 
@@ -26,7 +27,7 @@ async function go(){
     <div class="login-card">
       <aside class="login-brand">
         <div class="lb-top">
-          <div class="mark">亚</div>
+          <img class="mark logo-img" :src="logo" alt="亚德彩投标台账">
           <div>
             <div class="lb-name">亚德彩投标台账</div>
             <div class="lb-sub">投标部 · 全流程协同台账</div>
