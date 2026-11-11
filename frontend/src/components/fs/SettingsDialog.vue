@@ -12,7 +12,8 @@ const root = ref('');
 const stats = ref(null);
 const EDITABLE = ['retention_days', 'log_retention_days', 'chunk_size', 'max_file_size',
                   'quota_bytes', 'max_name_len', 'max_depth', 'allow_ext', 'deny_ext',
-                  'purge_hour', 'enable_dedup', 'max_versions', 'owner_full_control'];
+                  'purge_hour', 'enable_dedup', 'max_versions', 'owner_full_control',
+                  'office_server', 'office_secret', 'office_base_url'];
 
 watch(() => props.open, async v => {
   if(!v) return;

@@ -172,3 +172,66 @@ supervisorctl start taizhang
 | 修改账号 | 编辑 `server/users.json` 后 `supervisorctl restart taizhang` |
 | 更新前端 | 重新 `npm run build` 替换 `frontend/dist`，Nginx 无需重启 |
 | 备份数据 | `cp server/data.db server/data.db.bak`（复制该文件即完成备份） |
+
+---
+
+## 8. ONLYOFFICE 在线预览 / 编辑（可选）
+
+文件存储里的 docx / xlsx / pptx / csv / txt 可以直接在浏览器里预览与编辑（pdf、doc/xls/ppt 只读预览），
+保存时自动生成新版本，旧版本照常进入「7 天备份」。由独立的 ONLYOFFICE Document Server（Docker）提供能力。
+
+### 8.1 部署 DS
+
+```bash
+cd /opt/taizhang/deploy/onlyoffice
+# 先改 docker-compose.yml 里的 JWT_SECRET（与后端 OFFICE_SECRET 完全一致）
+docker compose up -d
+curl http://127.0.0.1:8888/healthcheck        # 等 1-2 分钟，返回 true 即就绪
+```
+
+### 8.2 后端环境变量（三处任选其一，优先级：设置页 > 下面两处）
+
+| 变量 | 值 | 说明 |
+|---|---|---|
+| `OFFICE_SERVER` | `http://<内网IP>:8888` | **浏览器**访问 DS 的地址；也可在「文件存储→设置」里改 |
+| `OFFICE_SECRET` | 与容器 `JWT_SECRET` 一致 | DS 开了 JWT 就必填，不一致编辑器打不开 |
+| `OFFICE_BASE_URL` | `http://<宿主机内网IP>:8000` | **DS 容器**回源拉文件/发回调的地址；容器里的 127.0.0.1 是容器自己 |
+
+- Windows 开发机：`start_api.bat` 已写好示例，用 `http://host.docker.internal:8000`。
+- Linux 生产：`taizhang.conf` 的 `environment` 段，用宿主机内网 IP，DS 容器需 `host-gateway`。
+- 设置页（推荐）：「文件存储 → 设置 → office_server / office_secret / office_base_url」，改完立即生效、不必重启。
+
+**端口不能省**：只写 `http://host.docker.internal` 会让 DS 去连容器的 80 端口。
+后端有兜底（自动补浏览器访问后端的端口），但显式写端口最稳（前面有 Nginx 反代 80 时可省略）。
+
+### 8.3 验证
+
+登录 → 文件存储 → 上传一个 .docx → 列表行出现「编辑」按钮（只有查看权限的用户是「预览」）→
+打开修改 → 点工具栏「保存」→ 列表版本号 +1，「版本」里能看到「在线编辑保存前备份」的旧版本。
+
+一条命令验证容器能否回源（返回 401 即为通，401 只是没登录）：
+
+```bash
+docker exec taizhang-onlyoffice curl -s -o /dev/null -w "%{http_code}\n" \
+  http://host.docker.internal:8000/api/fs/office/enabled
+```
+
+### 8.4 常见问题
+
+> 打开文档报错时，错误面板上有「**一键诊断**」按钮，会把「DS 地址 / DS 可达 / 回源地址 /
+> 回源取文件 / JWT 密钥」五项真值摊开并给出结论，先点它。
+
+| 错误码 | 含义 | 处理 |
+|---|---|---|
+| -4 | 与文档服务连接断开 | DS 重启中或网络抖动，重开即可 |
+| -7 | 配置签名校验失败 | `OFFICE_SECRET` ≠ 容器 `JWT_SECRET` |
+| -8 | 无法连接文档服务 | DS 未就绪 / 地址端口不对 |
+| -21 / -24 | **无法下载文件**（最常见） | `OFFICE_BASE_URL` 指向了容器自己，或漏写端口 |
+| -2 / -3 | 打开超时 / 转换失败 | 文件损坏，或后缀与实际格式不符 |
+| -29 | 不支持的格式 | 老格式 doc/xls/ppt 只能预览，先转存 docx/xlsx/pptx |
+
+- **报「token is not correctly formed」或 -7**：核对
+  `docker inspect taizhang-onlyoffice --format '{{range .Config.Env}}{{println .}}{{end}}' | grep JWT`。
+  改完 compose 的 `JWT_SECRET` 必须 `docker compose up -d --force-recreate`（环境变量不能在运行中的容器上改）。
+- **保存后列表没变**：刷新列表；仍不变看后端日志搜 `[office] 回调处理失败`。
+- **文档打不开但不报错**：浏览器直接访问 config 里的 `document.url`，能下载说明回源正常，问题在 JWT。

@@ -6,7 +6,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api, apiBlob } from '../api/client'
 import { toast } from '../stores/bid'
 import { can } from '../stores/perm'
-import { FS_OPS, canFs, humanSize, kindOf, tsText } from '../lib/fsPerm'
+import { FS_OPS, canFs, humanSize, kindOf, tsText, isOfficeExt, isOfficeEditable } from '../lib/fsPerm'
 import { filesQueue, fromInput, fromDataTransfer } from '../lib/fsUploader'
 import FileTree from '../components/fs/FileTree.vue'
 import PermDialog from '../components/fs/PermDialog.vue'
@@ -14,6 +14,7 @@ import VersionDrawer from '../components/fs/VersionDrawer.vue'
 import RecycleBin from '../components/fs/RecycleBin.vue'
 import OpLogPanel from '../components/fs/OpLogPanel.vue'
 import SettingsDialog from '../components/fs/SettingsDialog.vue'
+import OfficeEditor from '../components/fs/OfficeEditor.vue'
 
 const cur = ref('');
 const trail = ref([]);
@@ -37,6 +38,12 @@ const setOpen = ref(false);
 const permTarget = ref({ id: '', name: '', path: '/' });
 const verTarget = ref({ id: '', name: '' });
 const verCanOverwrite = ref(false);
+
+/* ONLYOFFICE 在线预览 / 编辑：officeOn 由 /office/enabled 探测，未配置时整块入口隐藏 */
+const officeOn = ref(false);
+const officeOpen = ref(false);
+const officeId = ref('');
+const officeName = ref('');
 
 const fileInput = ref(null);
 const dirInput = ref(null);
@@ -87,7 +94,20 @@ function openDir(id){
   cur.value = id;
   load();
 }
-onMounted(load);
+async function checkOffice(){
+  try{
+    const r = await api('/api/fs/office/enabled');
+    officeOn.value = !!r.enabled;
+  }catch(e){ officeOn.value = false; }   // 旧后端没有该路由时静默降级，不影响文件列表
+}
+onMounted(() => { load(); checkOffice(); });
+
+function openOffice(n){
+  if(!officeOn.value || n.kind !== 'file' || !isOfficeExt(n.name)) return;
+  officeId.value = n.id;
+  officeName.value = n.name;
+  officeOpen.value = true;
+}
 
 async function refreshAll(){
   await load();
@@ -377,6 +397,8 @@ onUnmounted(() => clearInterval(taskTimer));
                 <td class="fs-nm">
                   <span class="fs-ico" :class="{ dir: n.kind === 'dir' }">{{ n.kind === 'dir' ? '▤' : kindOf(n.name) }}</span>
                   <span class="txt" v-if="n.kind === 'dir'" :title="n.name" @click.stop="openDir(n.id)">{{ n.name }}</span>
+                  <span class="txt lnk" v-else-if="officeOn && isOfficeExt(n.name)"
+                        :title="n.name + '（点击在线预览 / 编辑）'" @click.stop="openOffice(n)">{{ n.name }}</span>
                   <span class="txt" v-else :title="n.name">{{ n.name }}</span>
                 </td>
                 <td>{{ n.kind === 'dir' ? '目录' : (n.ext || '文件') }}</td>
@@ -387,10 +409,14 @@ onUnmounted(() => clearInterval(taskTimer));
                 <td class="fs-ops">
                   <em v-for="o in FS_OPS" :key="o.k" :class="{ on: canFs(n.perm, o.k) }">{{ o.l }}</em>
                   <span class="sp"></span>
-                  <button class="btnb" v-if="n.kind === 'file'" @click.stop="download(n)">下载</button>
-                  <button class="btnb" v-if="n.kind === 'file'" @click.stop="openVersions(n)">版本</button>
-                  <button class="btnb" @click.stop="openPerm(n)">权限</button>
-                  <button class="btnb act-del" @click.stop="remove(n)">删除</button>
+                  <button class="btnb btnb-txt" v-if="officeOn && n.kind === 'file' && isOfficeExt(n.name)"
+                          @click.stop="openOffice(n)">
+                    {{ isOfficeEditable(n.name) && canFs(n.perm, 'overwrite') ? '编辑' : '预览' }}
+                  </button>
+                  <button class="btnb btnb-txt" v-if="n.kind === 'file'" @click.stop="download(n)">下载</button>
+                  <button class="btnb btnb-txt" v-if="n.kind === 'file'" @click.stop="openVersions(n)">版本</button>
+                  <button class="btnb btnb-txt" @click.stop="openPerm(n)">权限</button>
+                  <button class="btnb btnb-txt act-del" @click.stop="remove(n)">删除</button>
                 </td>
               </tr>
               <tr v-if="!shown.length">
@@ -414,6 +440,8 @@ onUnmounted(() => clearInterval(taskTimer));
     <RecycleBin :open="binOpen" @close="binOpen = false" @changed="refreshAll()" />
     <OpLogPanel :open="logOpen" @close="logOpen = false" />
     <SettingsDialog :open="setOpen" @close="setOpen = false" />
+    <OfficeEditor :open="officeOpen" :node-id="officeId" :node-name="officeName"
+                  @close="officeOpen = false" @changed="load()" />
 
     <div class="mask" :class="{ on: conflictOpen }" style="z-index:120">
       <div class="dlg" style="width:460px">
