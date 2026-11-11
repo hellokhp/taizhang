@@ -1,0 +1,48 @@
+# ================================================================
+# ONLYOFFICE Document Server（taizhang 文件存储 · 在线预览/编辑）
+#
+# 启动：
+#   cd deploy/onlyoffice && docker compose up -d
+#   # 首次启动约 1-2 分钟（初始化字体/服务），健康检查：
+#   curl http://127.0.0.1:8888/healthcheck   → true
+#
+# 配套改动（3 处，缺一不可）：
+#   1. 后端环境变量（supervisor 或 start 脚本）加：
+#        OFFICE_SERVER=http://<本机内网IP>:8888   # 浏览器访问 DS 的地址（也可在
+#                                                  # 「文件存储→设置→ONLYOFFICE 服务地址」里改）
+#        OFFICE_SECRET=与下方 JWT_SECRET 相同     # DS 开了 JWT 就必填
+#        OFFICE_BASE_URL=http://host.docker.internal:8000
+#          # DS 容器回源拉文件/发保存回调走的地址：经 host-gateway 到宿主机后端。
+#          # **必须带端口**（uvicorn 在 8000）；写成 http://host.docker.internal 会让
+#          # DS 去连容器的 80，表现就是编辑器打不开 / 报「无法下载文件 -24」。
+#          # 前面有 Nginx 反代 80 时可省略端口。
+#   2. 重启后端：supervisorctl restart taizhang
+#   3. 前端刷新即可：文件列表出现「编辑 / 预览」按钮。
+#
+# 说明：
+#   - JWT 必须开启（否则任何能访问 DS 的人都可以伪造编辑器配置）。
+#     JWT_SECRET 两边必须一致；改密钥后用户需刷新页面重新打开文档。
+#   - 内存占用约 1.5-2GB，建议 4GB 以上内存的生产机部署。
+#   - data/ 目录是 DS 的缓存/日志，可定期清理（丢失只影响打开速度，不影响数据）。
+#   - 也可以不暴露 8888，改用 Nginx 反代（见 DEPLOY.md 第 4 节 /office/ 说明）。
+# ================================================================
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:9.4
+    container_name: taizhang-onlyoffice
+    restart: unless-stopped
+    ports:
+      - "8888:80"                     # 浏览器要能访问；只想本机访问改为 "127.0.0.1:8888:80"
+    environment:
+      - JWT_ENABLED=true
+      # 必须与后端 OFFICE_SECRET / 「设置 → ONLYOFFICE JWT 密钥」完全一致，
+      # 否则编辑器报「配置签名校验失败」或直接白屏。生产环境务必换成随机长串。
+      - JWT_SECRET=dev_secret_123
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data/logs:/var/log/onlyoffice
+      - ./data/data:/var/www/onlyoffice/Data
+      - ./data/lib:/var/lib/onlyoffice
+    extra_hosts:
+      # DS 在容器里要回源访问宿主机上的 Nginx(80)/后端(8000)
+      - "host.docker.internal:host-gateway"

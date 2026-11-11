@@ -6,7 +6,9 @@ import logo from './assets/images/logo.png'
 import EditDialog from './components/EditDialog.vue'
 import DetailDialog from './components/DetailDialog.vue'
 import ImportDialog from './components/ImportDialog.vue'
+import BidUploadDialog from './components/BidUploadDialog.vue'
 import ToastBox from './components/ToastBox.vue'
+import UploadDock from './components/fs/UploadDock.vue'
 import LoginView from './views/LoginView.vue'
 import { dlg, imp, boot } from './stores/bid'
 import { auth, logout } from './stores/auth'
@@ -72,5 +74,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
   <EditDialog />
   <DetailDialog />
   <ImportDialog />
+  <BidUploadDialog />
   <ToastBox />
+  <!-- 全局上传任务面板：文件存储页 / 标段附件上传的所有任务都汇总在这里，
+       切页或关窗都不中断，进度与失败常驻可见 -->
+  <UploadDock />
 </template>

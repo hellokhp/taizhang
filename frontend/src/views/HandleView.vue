@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ST, leadOpts, openDetail, openEdit } from '../stores/bid'
+import { ST, leadOpts, openDetail, openEdit, bidFiles, filesState } from '../stores/bid'
 import { ALERT_TYPES, buildAlerts, countByType, sevOf } from '../lib/alerts'
 import { can, canAgg, canSee } from '../stores/perm'
 import { bondState, bidStatusOf } from '../lib/fields'
@@ -14,10 +14,13 @@ const capBid  = computed(() => canAgg('bidStatus'));
 const capBond = computed(() => canAgg('bondStatus'));
 const capPerf = computed(() => canAgg('perfStatus'));
 const capAmt  = computed(() => canAgg('bondAmount'));
+/* 「标书未上传」需要标书状态可聚合 + 文件查看权限 + 文件数已拉取成功 */
+const capFile = computed(() => can('view.files') && filesState.loaded);
 
 /* 可用的筛选项：按权限收敛（关注级三类同样按字段可见性收敛） */
 const types = computed(() => ALERT_TYPES.filter(t => {
   if(t.k === 'prep') return capBid.value;
+  if(t.k === 'bidfile') return capBid.value && capFile.value;
   if(t.k === 'pay' || t.k === 'refund' || t.k === 'guar') return capBond.value || capPerf.value;
   if(t.k === 'info') return canSee('lead') || canSee('bidNo') || canSee('openTime');
   if(t.k === 'amount') return canAgg('winAmount');
@@ -36,7 +39,8 @@ const pageSize = ref(20);
 /* minor: true → 同时纳入「关注」级事项（信息缺失 / 待补金额 / 保函到期），
    与看板「关注」计数同源，保证面板数字点进来都能找到对应条目 */
 const all = computed(() => buildAlerts(ST.rows, {
-  bid: capBid.value, bond: capBond.value, perf: capPerf.value, minor: true
+  bid: capBid.value, bond: capBond.value, perf: capPerf.value, minor: true,
+  bidFile: capBid.value && capFile.value, files: bidFiles
 }));
 
 /* 关键词 / 负责人筛选（等级筛选之前，用于给等级下拉带全局数量） */

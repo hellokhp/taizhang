@@ -221,7 +221,7 @@ function cellClass(c){
           </td>
         </template>
         <td v-if="canOp" class="col-op">
-          <button v-if="canUp" class="btnb act-up" title="上传项目文件" @click="openBidUpload(r.id)">
+          <button v-if="canUp" class="btnb act-up" title="上传招标文件" @click="openBidUpload(r.id, 'tender')">
             <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 5.2 5.9 9.9a1.9 1.9 0 0 0 2.7 2.7l4.9-4.9a3.2 3.2 0 0 0-4.5-4.5L3.8 8.4a4.5 4.5 0 0 0 6.4 6.4l3.8-3.8"/></svg>
           </button>
           <button v-if="canEdit" class="btnb act-edit" title="编辑" @click="openEdit(r.id)">

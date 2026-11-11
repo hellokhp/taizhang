@@ -12,7 +12,7 @@ const BASE = [
   {k:'lead',       l:'负责人',         t:'lead',                        w:110, g:'常用列'},
   {k:'result',     l:'开标结果',       t:'result',                      w:92,  g:'常用列'},
   {k:'winner',     l:'中标单位',       t:'winner',                      w:180, g:'常用列'},
-  {k:'amount',     l:'金额（万元）',   t:'amount', sortable:false,      w:110, g:'常用列'},
+  {k:'amount',     l:'金额（元）',     t:'amount', sortable:false,      w:110, g:'常用列'},
   {k:'bondStatus', l:'保证金',         t:'bond',                        w:100, g:'常用列'}
 ];
 
@@ -24,7 +24,7 @@ const WIDE = ['agency','owner','openAddr','bondIssuer','perfIssuer','noticeUrl']
 /* 表头空间有限：字段可用 cl 指定较短的列名（表单/详情/权限仍用完整 l） */
 const EXTRA = F.filter(f => IN_BASE.indexOf(f.k) < 0).map(f => ({
   k: f.k,
-  l: (f.cl || f.l).replace('（万元）', ''),
+  l: (f.cl || f.l).replace('（元）', ''),
   t: f.t,
   g: f.g,
   w: f.k === 'remark' ? 240 : (WIDE.indexOf(f.k) >= 0 ? 160 : (f.t === 'num' || f.t === 'date' ? 110 : 120)),

@@ -7,9 +7,8 @@ import { api, apiBlob } from '../api/client'
 import { toast } from '../stores/bid'
 import { can } from '../stores/perm'
 import { FS_OPS, canFs, humanSize, kindOf, tsText } from '../lib/fsPerm'
-import { UploadQueue, fromInput, fromDataTransfer } from '../lib/fsUploader'
+import { filesQueue, fromInput, fromDataTransfer } from '../lib/fsUploader'
 import FileTree from '../components/fs/FileTree.vue'
-import UploadQueuePanel from '../components/fs/UploadQueue.vue'
 import PermDialog from '../components/fs/PermDialog.vue'
 import VersionDrawer from '../components/fs/VersionDrawer.vue'
 import RecycleBin from '../components/fs/RecycleBin.vue'
@@ -42,7 +41,22 @@ const verCanOverwrite = ref(false);
 const fileInput = ref(null);
 const dirInput = ref(null);
 const treeRef = ref(null);
-const queue = new UploadQueue();
+/* 共享队列：切到别的页面再回来，任务与失败记录仍在；后台上传不因路由卸载而中断。
+   所有入口（上传文件 / 上传整个文件夹 / 拖拽）都进这一条队列，并汇总到右下角全局任务面板。 */
+const queue = filesQueue;
+
+/* 上传任务统一交给全局悬浮栏（常驻 / 可拖动 / 可折叠），页面里不再有表格底部的队列。
+   这里只留计数与「展开 / 定位」入口；队列是普通对象，用轻量定时器刷计数即可。 */
+const taskTick = ref(0);
+const taskTimer = setInterval(() => { taskTick.value++; }, 600);
+const taskCount = computed(() => { taskTick.value; return queue.items.length; });
+const taskRunning = computed(() => { taskTick.value; return queue.stats().busy; });
+function toggleDock(){ window.dispatchEvent(new Event('wb-open-upload-dock')); }
+
+/* 页面里已不挂队列面板，上传完成后仍需刷新文件列表（含空文件夹建好的目录） */
+const onQueueFinish = () => { refreshAll(); };
+queue.onFinish = onQueueFinish;
+onUnmounted(() => { if(queue.onFinish === onQueueFinish) queue.onFinish = null; });
 
 const isAdmin = computed(() => can('file.admin'));
 const shown = computed(() => {
@@ -162,30 +176,39 @@ function answerConflict(v){
   conflictResolve = null;
 }
 
-async function push(list, parentId){
+/* 给本批任务打上来源标签，右下角全局任务面板据此区分「上传文件 / 上传文件夹 / 拖拽」 */
+function tagQueue(label){
+  queue.title = label;
+  queue.sub = '目标目录：' + (name.value || '存储根目录');
+}
+
+async function push(list, parentId, label){
   if(!list.length) return;
   let conflict = 'reject';
   if(conflictFor(list)){
     conflict = await askConflict(list.length);
     if(!conflict) return;
   }
+  tagQueue(label || ('上传文件 · ' + list.length + ' 个'));
   queue.add(list, parentId, { conflict: conflict });
 }
 
 function onPickFiles(e){
   const list = fromInput(e.target.files);
   e.target.value = '';
-  push(list, cur.value);
+  push(list, cur.value, '上传文件 · ' + list.length + ' 个');
 }
 
 async function onPickFolder(e){
   const list = fromInput(e.target.files);
   e.target.value = '';
-  await uploadTree(list);
+  const root = (list[0] && list[0].rel.split('/')[0]) || '文件夹';
+  await uploadTree(list, '上传文件夹 · ' + root + '（' + list.length + ' 个文件）');
 }
 
-async function uploadTree(list){
-  // 先按相对路径一次性建好目录树，再分组并发上传（空目录也会保留）
+async function uploadTree(list, label){
+  if(!list.length) return;
+  // 先按相对路径一次性建好目录树，再把整批文件一次性加入队列（空目录也会保留）
   const dirs = [];
   list.forEach(f => {
     const d = f.rel.indexOf('/') > 0 ? f.rel.split('/').slice(0, -1).join('/') : '';
@@ -199,13 +222,21 @@ async function uploadTree(list){
       map = r.map || {};
     }catch(e){ toast(e.message); return; }
   }
+  /* 同名确认整批只弹一次：以前按子目录逐组 await push，一个多层文件夹会连弹多次，
+     且用户中途取消会让后面的分组整组不进队列。 */
+  let conflict = 'reject';
+  if(conflictFor(list)){
+    conflict = await askConflict(list.length);
+    if(!conflict) return;
+  }
   const groups = {};
   list.forEach(f => {
     const d = f.rel.indexOf('/') > 0 ? f.rel.split('/').slice(0, -1).join('/') : '';
     const pid = d ? (map[d] || cur.value) : cur.value;
     (groups[pid] = groups[pid] || []).push(f);
   });
-  for(const pid of Object.keys(groups)) await push(groups[pid], pid);
+  tagQueue(label || ('上传文件夹 · ' + list.length + ' 个文件'));
+  Object.keys(groups).forEach(pid => queue.add(groups[pid], pid, { conflict: conflict }));
   if(dirs.length) await refreshAll();
 }
 
@@ -215,7 +246,7 @@ async function onDrop(e){
   if(!dt) return;
   if(dt.items && dt.items.length && dt.items[0].webkitGetAsEntry){
     const r = await fromDataTransfer(dt);
-    if(r.files.length) await uploadTree(r.files);
+    if(r.files.length) await uploadTree(r.files, '拖拽上传 · ' + r.files.length + ' 个文件');
     else if(r.dirs.length){
       try{
         await api('/api/fs/mkdir/batch', { method: 'POST',
@@ -225,7 +256,8 @@ async function onDrop(e){
       }catch(err){ toast(err.message); }
     }
   }else{
-    await push(fromInput(dt.files), cur.value);
+    const list = fromInput(dt.files);
+    await push(list, cur.value, '拖拽上传 · ' + list.length + ' 个文件');
   }
 }
 
@@ -258,6 +290,7 @@ function onKey(e){
 }
 onMounted(() => document.addEventListener('keydown', onKey));
 onUnmounted(() => document.removeEventListener('keydown', onKey));
+onUnmounted(() => clearInterval(taskTimer));
 </script>
 
 <template>
@@ -294,6 +327,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
       <button class="btn ghost" v-if="isAdmin" @click="logOpen = true">操作日志</button>
       <button class="btn ghost" v-if="isAdmin" @click="setOpen = true">设置</button>
       <button class="btn ghost" @click="refreshAll()">刷新</button>
+      <button class="btn ghost" v-if="taskCount" title="展开 / 定位上传任务栏" @click="toggleDock">
+        上传任务 {{ taskCount }}<template v-if="taskRunning"> · 进行中</template>
+      </button>
 
       <span class="fs-myperm">
         我在本目录：
@@ -367,7 +403,6 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
         </div>
 
         <div class="fs-drop" v-if="dragging">松开即可上传（支持整个文件夹）</div>
-        <UploadQueuePanel :queue="queue" @done="refreshAll()" />
       </section>
     </div>
 

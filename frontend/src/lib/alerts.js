@@ -11,6 +11,7 @@ import { isNoBid, bondState, bondKind, shortType, bidStatusOf } from './fields'
 export const ALERT_TYPES = [
   {k:'soon',   l:'待开标',     tag:'即将开标',   lv:1, hint:'7 天内开标，标书仍需递交'},
   {k:'prep',   l:'标书未准备', tag:'标书未准备', lv:1, sev:2, hint:'今天及以后开标，标书仍未开始编写（紧急）'},
+  {k:'bidfile', l:'标书未上传', tag:'标书未上传', lv:2, hint:'标书状态为「进行中」，但项目「标书」目录里还没有文件'},
   {k:'pay',    l:'待缴费',     tag:'待缴费',     lv:2, hint:'投标 / 履约保证金尚未缴纳'},
   {k:'refund', l:'待退费',     tag:'待退费',     lv:2, hint:'投标 / 履约保证金已缴但尚未退回'},
   /* 关注级：明细台账质量问题，仅详情页展示（看板面板的「关注」计数即这批） */
@@ -23,7 +24,7 @@ ALERT_TYPES.forEach(t => { ALERT_TYPE_MAP[t.k] = t; });
 
 function money(v){
   const n = num(v);
-  return n > 0 ? n.toLocaleString('zh-CN', {maximumFractionDigits:2}) + ' 万' : '';
+  return n > 0 ? n.toLocaleString('zh-CN', {maximumFractionDigits:2}) + ' 元' : '';
 }
 function leadOf(r){ return r.lead || '未指定负责人'; }
 function openTxt(d){ return d === 0 ? '今天开标' : d + ' 天后开标'; }
@@ -35,8 +36,11 @@ function gapTxt(d){
 /**
  * 生成事项列表
  * @param rows 台账行
- * @param opt  { bid, bond, perf, minor }  bid/bond/perf = 对应字段是否可参与统计（canAgg）；
- *             minor = 是否附带「关注」级小事项（信息缺失 / 待补金额 / 保函到期）
+ * @param opt  { bid, bond, perf, minor, bidFile, files }
+ *             bid/bond/perf = 对应字段是否可参与统计（canAgg）；
+ *             minor = 是否附带「关注」级小事项（信息缺失 / 待补金额 / 保函到期）；
+ *             bidFile = 标书文件数是否可用（有文件权限且已拉取成功）；
+ *             files = rid → 「标书」目录文件数（缺省按 0）
  */
 export function buildAlerts(rows, opt){
   opt = opt || {};
@@ -44,6 +48,12 @@ export function buildAlerts(rows, opt){
   const bond  = opt.bond  !== false;
   const perf  = opt.perf  !== false;
   const minor = !!opt.minor;
+  const bidFile = opt.bidFile === true;
+  const files = opt.files || {};
+  const filesOf = r => {
+    const n = files[String(r.id)];
+    return typeof n === 'number' ? n : 0;
+  };
   const out = [];
 
   (rows || []).forEach(r => {
@@ -66,6 +76,15 @@ export function buildAlerts(rows, opt){
       out.push({ type:'prep', lv:1, sev:2, tag:'标书未准备', r, d, daysPast:0,
         reason:'标书仍未开始编写',
         sub:dateTxt + ' 开标（' + openTxt(d) + '） · 标书仍未开始编写 · ' + leadOf(r) });
+    }
+
+    /* 2b. 标书未上传：标书状态已「进行中」，但项目「标书」目录里还没有文件
+        判据只看状态与文件数，不看开标时间/结果（含已过开标但仍在编写的标书） */
+    if(bidFile && bid && bidStatusOf(r) === '进行中' && filesOf(r) === 0){
+      out.push({ type:'bidfile', lv:2, tag:'标书未上传', r, d, daysPast:0,
+        reason:'标书进行中，标书文件尚未上传',
+        sub:'标书状态「进行中」，但「标书」目录还没有文件 · ' + leadOf(r) +
+            (d !== null ? ' · ' + gapTxt(d) : '') });
     }
 
     /* 3. 待缴费：待开标且投标 / 履约保证金尚未缴纳 */

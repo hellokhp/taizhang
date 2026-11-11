@@ -46,3 +46,20 @@ export function kindOf(name){
   };
   return map[ext] || (ext ? ext.slice(0, 3).toUpperCase() : 'FILE');
 }
+
+/* ---------- ONLYOFFICE 在线预览 / 编辑（与服务端 fs_office.SUPPORT_EXT 对齐） ---------- */
+export const OFFICE_EDIT_EXTS = ['docx', 'xlsx', 'pptx', 'csv', 'txt'];
+export const OFFICE_VIEW_EXTS = ['pdf', 'doc', 'xls', 'ppt'];
+export const OFFICE_EXTS = OFFICE_EDIT_EXTS.concat(OFFICE_VIEW_EXTS);
+
+/** 能否用 ONLYOFFICE 打开（预览或编辑） */
+export function isOfficeExt(name){
+  const ext = String(name || '').split('.').pop().toLowerCase();
+  return OFFICE_EXTS.indexOf(ext) >= 0;
+}
+
+/** 能否用 ONLYOFFICE 编辑（保存会产生新版本，需覆盖权限） */
+export function isOfficeEditable(name){
+  const ext = String(name || '').split('.').pop().toLowerCase();
+  return OFFICE_EDIT_EXTS.indexOf(ext) >= 0;
+}

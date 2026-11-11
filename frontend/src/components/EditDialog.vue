@@ -1,9 +1,10 @@
 <script setup>
 import { reactive, ref, computed, watch, onUnmounted } from 'vue'
-import { ST, dlg, closeDlg, upsertRow, removeRow, toast, getDraft, setDraft, clearDraft, staff } from '../stores/bid'
+import { ST, dlg, closeDlg, upsertRow, removeRow, toast, getDraft, setDraft, clearDraft, staff, openBidUpload, upDlg, filesState } from '../stores/bid'
 import { S0, FORM_ITEMS, bidStatusLocked, stampBidStatus } from '../lib/fields'
 import { can, canSee, canWrite, fieldMode } from '../stores/perm'
 import { auth } from '../stores/auth'
+import { api } from '../api/client'
 
 const canEdit = computed(() => can('bid.edit'));
 const canDel = computed(() => can('bid.delete'));
@@ -43,6 +44,39 @@ let statusPrev = '';                  // 上一次的标书状态（用于判断
 
 const dirty = computed(() => JSON.stringify(draft) !== baseSnap);
 
+/* ---------------- 标书文件（项目目录 / 标书） ----------------
+   目录由后端 GET /api/bid-dir 按「bidfile/开标年/开标月/项目名/标书」解析并补建；
+   状态改为「已结束」前必须有标书文件，保存时前置拦截 + 后端兜底。 */
+const canUpFiles = computed(() => can('view.files'));
+const fileInfo = reactive({ loading:false, path:'', files:0, err:'' });
+const needFile = ref(false);          // 「标书文件尚未上传」提示层
+
+async function refreshBidFiles(){
+  if(!dlg.id){ fileInfo.path = ''; fileInfo.files = 0; fileInfo.err = ''; return 0; }
+  fileInfo.loading = true;
+  try{
+    const d = await api('/api/bid-dir?rid=' + encodeURIComponent(dlg.id));
+    fileInfo.path = d.bidPath || '';
+    fileInfo.files = d.bidFiles || 0;
+    fileInfo.err = '';
+  }catch(e){
+    fileInfo.err = e.message || '标书目录读取失败';
+    fileInfo.loading = false;
+    return -1;      // 读不到目录（无文件权限等）：不拦截保存，由后端给出明确提示
+  }
+  fileInfo.loading = false;
+  return fileInfo.files;
+}
+function goUploadBid(){
+  if(!dlg.id) return;
+  needFile.value = false;
+  openBidUpload(dlg.id, 'bid');
+}
+/* 上传窗口关闭后刷新标书文件数（可能刚传完） */
+watch(() => upDlg.open, on => { if(!on && dlg.open) refreshBidFiles(); });
+/* 上传在后台跑完时（窗口已关）也能把这里的文件数刷新过来 */
+watch(() => filesState.rev, () => { if(dlg.open) refreshBidFiles(); });
+
 watch(() => dlg.open, v => {
   if(v){
     const r = dlg.id ? ST.rows.find(x => x.id === dlg.id) : null;
@@ -53,18 +87,22 @@ watch(() => dlg.open, v => {
     statusPrev = draft.bidStatus || '';
     baseSnap = JSON.stringify(draft);
     confirmLeave.value = false;
+    needFile.value = false;
     document.addEventListener('keydown', onKey);
+    refreshBidFiles();
   }else{
+    needFile.value = false;
     document.removeEventListener('keydown', onKey);
   }
 });
 onUnmounted(() => document.removeEventListener('keydown', onKey));
 
 function onKey(e){
-  if(e.key === 'Escape'){
-    if(confirmLeave.value) confirmLeave.value = false;
-    else attemptClose();
-  }
+  if(e.key !== 'Escape') return;
+  if(confirmLeave.value){ confirmLeave.value = false; return; }
+  if(needFile.value){ needFile.value = false; return; }
+  if(upDlg.open) return;              // 上传窗在最上层，Esc 由它自己处理
+  attemptClose();
 }
 /* 标书状态变更：立刻补写对应状态时间点（保存时 bid.js / 后端会再兜底一次） */
 function onFieldChange(k){
@@ -77,7 +115,7 @@ function attemptClose(){
   if(dirty.value){ confirmLeave.value = true; return; }
   closeDlg();
 }
-function saveDlg(){
+async function saveDlg(){
   confirmLeave.value = false;
   const o = {};
   Object.keys(draft).forEach(k => { o[k] = typeof draft[k] === 'string' ? draft[k].trim() : draft[k]; });
@@ -86,6 +124,13 @@ function saveDlg(){
   if(!o.lead){ toast('请填写标书负责人'); return; }
   if(['中标','未中标'].indexOf(o.result) >= 0 && !o.winner){
     if(!confirm('未填写中标单位，确认保存？')) return;
+  }
+  /* 标书状态改为「已结束」：项目「标书」目录必须先有文件（新增标段补录历史数据不拦；
+     无文件查看权限的账号不做前端拦截，交给后端返回明确提示） */
+  const wasEnd = String((dlg.base && dlg.base.bidStatus) || '').trim() === '已结束';
+  if(dlg.id && o.bidStatus === '已结束' && !wasEnd && canUpFiles.value){
+    const n = await refreshBidFiles();
+    if(n === 0){ needFile.value = true; return; }
   }
   clearDraft(dlg.id);                 // 已正式保存，草稿不再需要
   upsertRow(dlg.id, o);
@@ -135,6 +180,27 @@ const updatedInfo = computed(() => {
             </div>
           </template>
         </div>
+
+        <!-- 标书文件：项目目录 / 标书（状态改「已结束」前必须有文件） -->
+        <div v-if="dlg.id" class="bid-files">
+          <div class="bf-h">
+            <b>标书文件</b>
+            <span class="bf-sub">目录 / 标书</span>
+            <span class="bf-cnt">{{ fileInfo.loading ? '读取中…' : fileInfo.files + ' 个文件' }}</span>
+          </div>
+          <div class="bf-path" :class="{bad: !!fileInfo.err}" :title="fileInfo.path || fileInfo.err">
+            {{ fileInfo.err || fileInfo.path || '目录准备中…' }}
+          </div>
+          <div class="bf-act">
+            <button v-if="canUpFiles" class="btn ghost" @click="goUploadBid()">上传标书文件</button>
+            <span class="bf-tip" :class="{warn: !fileInfo.loading && fileInfo.files <= 0}">
+              {{ (!fileInfo.loading && fileInfo.files <= 0)
+                ? '状态改为「已结束」前，需先上传标书文件'
+                : '标书状态改为「已结束」前须已有标书文件，当前已满足' }}
+            </span>
+          </div>
+        </div>
+        <div v-else class="bid-files empty">标书文件：保存标段后，重新打开本窗口即可上传。</div>
       </div>
       <div class="dlg-f">
         <button class="btn danger" style="margin-right:auto" v-if="dlg.id && canDel" @click="removeRow(dlg.id)">删除此条</button>
@@ -155,6 +221,21 @@ const updatedInfo = computed(() => {
         <button class="btn" @click="confirmLeave = false">取消，继续编辑</button>
         <button class="btn" @click="keepDraft()">存草稿</button>
         <button class="btn pri" @click="saveDlg()">保存</button>
+      </div>
+    </div>
+  </div>
+  <!-- 状态改为「已结束」但标书目录为空：阻止保存，给上传入口 -->
+  <div class="mask" :class="{on: needFile}" style="z-index:125;" @click.self="needFile = false">
+    <div class="dlg" style="width:480px">
+      <div class="dlg-h"><h3>标书文件尚未上传</h3><span class="act" style="color:var(--mut)" @click="needFile = false">关闭 ✕</span></div>
+      <div class="dlg-b">
+        <div style="font-size:12.5px;color:var(--txt);line-height:1.7">标书状态要改为「已结束」，需要先把标书文件上传到项目的「标书」目录里。</div>
+        <div class="bf-path" :title="fileInfo.path">{{ fileInfo.path || '（目录准备中）' }}</div>
+        <div style="font-size:11.5px;color:var(--sub);margin-top:8px">上传完成后回到本窗口再点「保存」即可。</div>
+      </div>
+      <div class="dlg-f">
+        <button class="btn" @click="needFile = false">稍后上传</button>
+        <button v-if="canUpFiles" class="btn pri" @click="goUploadBid()">去上传标书文件</button>
       </div>
     </div>
   </div>

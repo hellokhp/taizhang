@@ -45,7 +45,7 @@ class FsError(Exception):
 DEFAULTS = {
     'retention_days': '7',           # 备份（旧版本 + 回收站）保留天数
     'log_retention_days': '180',     # 操作日志保留天数
-    'chunk_size': '5242880',         # 分片大小 5MB
+    'chunk_size': '16777216',        # 分片大小 16MB：大文件减少请求数与 fsync 次数
     'max_file_size': '2147483648',   # 单文件上限 2GB
     'max_name_len': '100',
     'max_depth': '16',
@@ -57,6 +57,10 @@ DEFAULTS = {
     'max_versions': '0',             # 单文件最多版本数，0=不限
     'owner_full_control': '1',       # 创建人对自己节点全权
     'log_detail_level': '1',         # 1=逐文件明细
+    'office_server': '',             # ONLYOFFICE Document Server 地址（浏览器可达），空=禁用在线预览/编辑
+    'office_secret': '',             # DS 的 JWT 密钥（两边一致才通过校验；DS 未启用 JWT 则留空）
+    'office_base_url': '',           # DS 容器回源取文件的地址（如 http://host.docker.internal:8000），空=按请求推导
+    'office_url_secret': '',         # 签名 URL 内部密钥（首次启动自动生成，勿手改）
 }
 ENV_KEYS = {
     'retention_days': 'FS_RETENTION_DAYS',
@@ -64,6 +68,9 @@ ENV_KEYS = {
     'chunk_size': 'FS_CHUNK_SIZE',
     'max_file_size': 'FS_MAX_FILE_SIZE',
     'quota_bytes': 'FS_QUOTA_BYTES',
+    'office_server': 'OFFICE_SERVER',
+    'office_secret': 'OFFICE_SECRET',
+    'office_base_url': 'OFFICE_BASE_URL',
 }
 
 ROOT_ID = ''
@@ -119,7 +126,18 @@ def lock():
 
 
 # ---------------- 配置读写 ----------------
+# 这三项要能在「文件存储 → 设置」里直接改并立即生效，所以 DB 优先、env 只作默认值；
+# 其余运维类配置（保留天数、分片大小等）保持 env 覆盖 DB，便于运维统一压制。
+_DB_FIRST = ('office_server', 'office_secret', 'office_base_url')
+
+
 def setting_str(k):
+    if k in _DB_FIRST:
+        r = db().execute('SELECT v FROM fs_settings WHERE k=?', (k,)).fetchone()
+        if r and str(r['v'] or '').strip():
+            return str(r['v']).strip()
+        env = ENV_KEYS.get(k)
+        return (os.environ.get(env, '').strip() if env else '') or DEFAULTS.get(k, '')
     env = ENV_KEYS.get(k)
     if env and os.environ.get(env, '').strip():
         return os.environ[env].strip()
@@ -156,35 +174,49 @@ RESERVED = {'CON', 'PRN', 'AUX', 'NUL'} | {'COM%d' % i for i in range(1, 10)} \
 
 
 def safe_name(raw, max_len=None):
+    """名称归一化。
+
+    注意：只清理「尾部」的点和空格（Windows 不允许文件名以 . 或空格结尾），
+    开头的点必须保留 —— .github / .gitignore / .env 这类隐藏文件是合法的，
+    之前用 strip(' .') 会把 .github 变成 github，导致整文件夹上传报「非法路径」。
+    """
     max_len = max_len or setting_int('max_name_len')
     name = str(raw or '').strip().replace('\\', '/').split('/')[-1]
-    name = ''.join('_' if ch in ILLEGAL else ch for ch in name).strip(' .')
-    if not name:
+    name = ''.join('_' if ch in ILLEGAL else ch for ch in name)
+    name = name.strip(' ').rstrip(' .')
+    if not name or name in ('.', '..'):
         raise FsError('名称不能为空（且不合法字符已被替换）')
     if len(name) > max_len:
-        name = name[:max_len].strip(' .') or ('unnamed')
+        name = name[:max_len].rstrip(' .') or ('unnamed')
     if name.split('.')[0].upper() in RESERVED:
         name = '_' + name
-    if name.lower() in ('.', '..'):
-        raise FsError('名称非法')
     return name
+
+
+def rel_bad(rel):
+    """返回相对路径中第一个非法片段，合法则返回 ''（用于给出精确报错）。"""
+    if not rel:
+        return ''
+    if rel.startswith('/') or '\\' in rel:
+        return rel
+    for seg in rel.split('/'):
+        if ':' in seg:
+            return seg
+        if seg in ('', '.', '..'):
+            return seg or rel
+        try:
+            if safe_name(seg) != seg:
+                return seg
+        except Exception:
+            return seg
+    return ''
 
 
 def rel_ok(rel):
     """整文件夹上传的相对路径校验：防 zip-slip / 路径穿越。"""
     if not rel:
         return False
-    if rel.startswith('/') or ':' in rel or '\\' in rel:
-        return False
-    for seg in rel.split('/'):
-        if seg in ('', '.', '..'):
-            return False
-        try:
-            if safe_name(seg) != seg:
-                return False
-        except Exception:
-            return False
-    return True
+    return rel_bad(rel) == ''
 
 
 def ext_of(name):
@@ -232,7 +264,19 @@ def put_blob(src_path, sha=None):
     dst = blob_path(sha)
     if not dst.exists():
         ensure_blob_dir(sha)
-        os.replace(str(src_path), str(dst))     # 同盘原子替换；已存在则丢弃临时文件
+        try:
+            os.replace(str(src_path), str(dst))     # 同盘原子替换；已存在则丢弃临时文件
+        except OSError:
+            # Windows：文件刚关闭时杀毒/索引可能还占着句柄，replace 报 WinError 5/32
+            time.sleep(0.15)
+            try:
+                os.replace(str(src_path), str(dst))
+            except OSError:
+                shutil.copyfile(str(src_path), str(dst))
+                try:
+                    os.remove(str(src_path))
+                except OSError:
+                    pass
     else:
         try:
             os.remove(str(src_path))
@@ -243,9 +287,11 @@ def put_blob(src_path, sha=None):
         if not row:
             db().execute('INSERT INTO fs_blob(sha256, size, ref_count, created_at) VALUES(?,?,1,?)',
                          (sha, os.path.getsize(str(dst)), time.time()))
-            db().commit()
         else:
             bump_ref(sha, 1)
+        # 必须提交：原来只在不插入时漏了 commit，连接会停在 idle in transaction
+        # 并一直持有该 blob 行的锁，后续同名内容上传全部阻塞，进而在全局锁上把整个服务拖死
+        db().commit()
     return sha
 
 
@@ -278,6 +324,29 @@ def now():
 
 def new_id():
     return uuid.uuid4().hex
+
+
+# ---------------- 上传分片索引 ----------------
+# 每片一行，靠主键 (upload_id, idx) 保证幂等；并发写互不干扰，重传覆盖也不报错。
+def add_part(upload_id, idx, size=0):
+    db().execute('INSERT INTO fs_upload_part(upload_id, idx, size, ts) VALUES(?,?,?,?) '
+                 'ON CONFLICT(upload_id, idx) DO UPDATE SET size=EXCLUDED.size, ts=EXCLUDED.ts',
+                 (upload_id, int(idx), int(size), time.time()))
+
+
+def parts_of(upload_id):
+    return [int(r['idx']) for r in db().execute(
+        'SELECT idx FROM fs_upload_part WHERE upload_id=? ORDER BY idx', (upload_id,)).fetchall()]
+
+
+def part_count(upload_id):
+    r = db().execute('SELECT COUNT(*) c FROM fs_upload_part WHERE upload_id=?',
+                     (upload_id,)).fetchone()
+    return int(r['c'] if r else 0)
+
+
+def clear_parts(upload_id):
+    db().execute('DELETE FROM fs_upload_part WHERE upload_id=?', (upload_id,))
 
 
 def get_node(nid):
@@ -379,7 +448,9 @@ def mkdir_batch(parent_id, paths, who):
     out = {}
     for rel in paths:
         if not rel_ok(rel):
-            raise FsError('非法路径：' + str(rel))
+            bad = rel_bad(rel)
+            raise FsError('非法路径：%s（片段「%s」不合法：不能包含 \\ / : * ? " < > | 等字符，'
+                          '不能为 . 或 ..，也不能以点或空格结尾）' % (str(rel), bad))
         cur = parent_id
         acc = ''
         segs = rel.split('/')
@@ -758,8 +829,18 @@ def gc_once():
     # 5) 临时分片目录（24h 前）
     try:
         cutoff = now() - 86400
+        # 超期未完成的上传会话标记为 expired：否则它们会永远占着「同时 6 个上传任务」的名额
+        db().execute("UPDATE fs_upload SET status='expired' WHERE status IN "
+                     "('init','uploading') AND ts < ?", (now() - 7 * 86400,))
+        db().commit()
+        # 仍在传 / 正在合并的会话目录一律不动：合并 2GB 文件时目录 mtime 会长时间停住，
+        # 只看 mtime 会把正在合并的目录当垃圾删掉（曾导致 complete 抛 FileNotFoundError）
+        active = set()
+        for r in db().execute("SELECT id FROM fs_upload WHERE status IN "
+                              "('init','uploading','merging')").fetchall():
+            active.add(r['id'])
         for d in ctx.tmp.iterdir():
-            if not d.is_dir():
+            if not d.is_dir() or d.name in active:
                 continue
             try:
                 if d.stat().st_mtime < cutoff:
@@ -768,6 +849,8 @@ def gc_once():
                 pass
         for f in ctx.tmp.glob('*.merge'):
             try:
+                if f.stem in active:
+                    continue
                 if f.stat().st_mtime < cutoff:
                     f.unlink()
             except Exception:
@@ -893,6 +976,17 @@ CREATE TABLE IF NOT EXISTS fs_upload(
 );
 CREATE INDEX IF NOT EXISTS idx_fs_upload_actor ON fs_upload(actor, ts);
 
+-- 分片索引独立成表：并发写不会互相覆盖（原 got 字符串读-改-写会丢分片），
+-- 也不会随分片数增长（2GB/16MB=128 片）把一串索引反复读写
+CREATE TABLE IF NOT EXISTS fs_upload_part(
+  upload_id TEXT NOT NULL,
+  idx       INTEGER NOT NULL,
+  size      BIGINT DEFAULT 0,
+  ts        DOUBLE PRECISION DEFAULT 0,
+  PRIMARY KEY(upload_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_fs_part_upload ON fs_upload_part(upload_id);
+
 CREATE TABLE IF NOT EXISTS fs_op_log(
   id            BIGSERIAL PRIMARY KEY,
   ts            DOUBLE PRECISION NOT NULL,
@@ -940,3 +1034,34 @@ def init_tables(dbobj):
             dbobj.commit()
         except Exception:
             dbobj.rollback()
+    # 老库升级 1：分片 5MB -> 16MB（仅当值还是旧默认，用户手动改过的不动）
+    try:
+        dbobj.execute('UPDATE fs_settings SET v=? WHERE k=? AND v=?',
+                      (DEFAULTS['chunk_size'], 'chunk_size', '5242880'))
+        dbobj.commit()
+    except Exception:
+        dbobj.rollback()
+    # 老库升级 2：把 fs_upload.got 里的分片索引回填到 fs_upload_part（正在传的会话不丢进度）
+    try:
+        rows = dbobj.execute("SELECT id, got FROM fs_upload "
+                             "WHERE status IN ('init','uploading') AND got <> ''").fetchall()
+        for r in rows:
+            for x in str(r['got'] or '').split(','):
+                x = x.strip()
+                if x.isdigit():
+                    dbobj.execute('INSERT INTO fs_upload_part(upload_id, idx, ts) VALUES(?,?,?) '
+                                  'ON CONFLICT(upload_id, idx) DO NOTHING',
+                                  (r['id'], int(x), time.time()))
+        dbobj.commit()
+    except Exception:
+        dbobj.rollback()
+    # 老库升级 3：ONLYOFFICE 签名 URL 密钥不存在/为空时自动生成（重启不变化，老签名不失效）
+    try:
+        r = dbobj.execute("SELECT v FROM fs_settings WHERE k='office_url_secret'").fetchone()
+        if not r or not str(r['v'] or '').strip():
+            dbobj.execute("INSERT INTO fs_settings(k, v, updated_at) VALUES('office_url_secret', ?, ?) "
+                          "ON CONFLICT(k) DO UPDATE SET v=EXCLUDED.v",
+                          (uuid.uuid4().hex + uuid.uuid4().hex, time.time()))
+            dbobj.commit()
+    except Exception:
+        dbobj.rollback()

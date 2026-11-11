@@ -1,19 +1,22 @@
 <script setup>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ST } from '../stores/bid'
+import { ST, bidFiles, filesState } from '../stores/bid'
 import { buildAlerts, sevOf } from '../lib/alerts'
 import { can, canAgg } from '../stores/perm'
 
 const router = useRouter();
 
 /* 计算口径统一在 lib/alerts.js（详情页共用）。
-   字段不可见/脱敏时对应预警无意义，直接不出（读到的不是真实值）。 */
+   字段不可见/脱敏时对应预警无意义，直接不出（读到的不是真实值）。
+   「标书未上传」依赖标书文件数：需同时具备标书状态可聚合 + 文件查看权限，且文件数已拉取成功。 */
 const alerts = computed(() => buildAlerts(ST.rows, {
   bid: canAgg('bidStatus'),
   bond: canAgg('bondStatus'),
   perf: canAgg('perfStatus'),
-  minor: true
+  minor: true,
+  bidFile: canAgg('bidStatus') && can('view.files') && filesState.loaded,
+  files: bidFiles
 })
   /* 面板只保留逾期超过 30 天的待退费，避免长期未退的存量把列表刷满；
      完整清单见「需要处理」详情页 */
@@ -41,7 +44,7 @@ function goLevel(lv){
       <h2>需要处理</h2>
       <div class="alert-sum">
         <button class="as" :class="{go: can('view.alerts')}" :disabled="!can('view.alerts')"
-          title="含：保证金未缴、标书未准备（点击查看）" @click="goLevel(2)">
+          title="含：保证金未缴、标书未准备、标书未上传（点击查看）" @click="goLevel(2)">
           <i style="background:var(--win)"></i>紧急 <b>{{ lvCount[2] }}</b>
         </button>
         <button class="as" :class="{go: can('view.alerts')}" :disabled="!can('view.alerts')"

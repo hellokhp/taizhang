@@ -3,7 +3,7 @@
    ================================================================ */
 import { reactive, computed, watch } from 'vue'
 import * as XLSX from 'xlsx'
-import { TODAY, pad, fmtYM, parseD, ymOf, yOf, dd, num, fmtMoney, fmtN, uid } from '../lib/format'
+import { TODAY, pad, fmtYM, parseD, ymOf, yOf, dd, num, uid } from '../lib/format'
 import { F, METHOD_OPTS, S0, SAMPLE, rowsFromMatrix, rowKey, cleanRow, isNoBid, isDecided, bondState, bondKind, stampBidStatus, bidEffortDays } from '../lib/fields'
 import { defaultTableCfg, normalizeTableCfg, clampWidth, clampRowH } from '../lib/tableCols'
 import { isoToday, rowInFund } from '../lib/fund'
@@ -47,22 +47,53 @@ export function openDetail(id){
   detailDlg.open = true;
 }
 export function closeDetail(){ detailDlg.open = false; }
-/* 标段附件上传弹窗：把文件存到该标段在文件存储里的项目目录（bidfile/年/月/项目名） */
-export const upDlg = reactive({open:false, id:''});
-export function openBidUpload(id){
+/* 标段附件上传弹窗：把文件存到该标段在文件存储里的项目目录
+   kind='tender' 招标文件（默认）/ 'bid' 标书文件 —— 两者是项目目录下的两个子目录 */
+export const upDlg = reactive({open:false, id:'', kind:'tender'});
+export function openBidUpload(id, kind){
   if(!id) return;
   upDlg.id = String(id);
+  upDlg.kind = kind === 'bid' ? 'bid' : 'tender';
   upDlg.open = true;
 }
 export function closeBidUpload(){ upDlg.open = false; }
+
+/* ==================== 标书文件数（「需要处理」用） ====================
+   rid → 该项目「标书」目录下的文件数，由 GET /api/bid-files 批量拉取（30 秒节流）。
+   仅供「标书未上传」判定：状态「进行中」且文件数为 0 → 出预警。
+   拉取失败时保留上次结果，不写 0，避免把整批标段误判成未上传。 */
+export const bidFiles = reactive({});
+export const filesState = reactive({ loaded:false, at:0, rev:0 });
+let filesP = null;
+export async function loadBidFiles(force){
+  const now = Date.now();
+  if(!force && filesP && now - filesState.at < 30000) return filesP;
+  filesState.at = now;
+  filesP = (async () => {
+    try{
+      const d = await api('/api/bid-files');
+      const m = d.files || {};
+      Object.keys(bidFiles).forEach(k => { if(!(k in m)) delete bidFiles[k]; });
+      Object.keys(m).forEach(k => { bidFiles[k] = m[k]; });
+      filesState.loaded = true;
+      if(force) filesState.rev++;      // 强制刷新（上传完成等）时通知页面重读目录
+    }catch(e){ /* 静默：无权限或断网时维持上次结果 */ }
+    return bidFiles;
+  })();
+  return filesP;
+}
+export function bidFilesOf(rid){
+  const n = bidFiles[String(rid)];
+  return typeof n === 'number' ? n : 0;
+}
 export const dlg = reactive({open:false, id:null, base:null});  // 编辑弹窗；base = 打开时的服务器快照（算脏字段用）
 export const imp = reactive({open:false, name:'', list:[], opt:{needLead:true, skipNo:true, overwrite:true}}); // 导入弹窗
 export const toastBox = reactive({msg:'', on:false});
 let toastTm = null;
-export function toast(msg){
+export function toast(msg, ms){
   toastBox.msg = msg; toastBox.on = true;
   clearTimeout(toastTm);
-  toastTm = setTimeout(() => { toastBox.on = false; }, 2400);
+  toastTm = setTimeout(() => { toastBox.on = false; }, ms || 2400);
 }
 
 /* ==================== 派生（纯函数） ==================== */
@@ -361,6 +392,7 @@ async function syncTick(){
     if(d.ts) lastSync = Math.max(lastSync, d.ts);
     if(n) toast('已同步同事提交的 ' + n + ' 条变更');
   }catch(e){ /* 静默，下轮再试 */ }
+  loadBidFiles();                       // 30 秒节流：文件数变化（上传/删除）也能跟上
 }
 
 export async function bootRemote(){
@@ -388,6 +420,7 @@ export async function bootRemote(){
     toast(e.message + '，暂用本机缓存，恢复后自动同步');
   }
   loadStaff();                          // 员工名单（不阻塞主流程）
+  loadBidFiles(true);                   // 标书文件数（「标书未上传」判定用）
   startSync();
 }
 
@@ -474,7 +507,11 @@ function pushable(r){
   return o;
 }
 /* 权限类错误（后端 403）：不重试，直接提示 */
-function isPermErr(e){ return /权限/.test((e && e.message) || ''); }
+/* 不可自动重试的错误：无权限、业务校验被拒（4xx；401 由 onUnauthorized 统一处理） */
+function isPermErr(e){
+  const s = e && e.status;
+  return /权限/.test((e && e.message) || '') || (s >= 400 && s < 500 && s !== 401);
+}
 export function resetFilter(){
   ST.f = {kw:'', lead:'', result:'', method:''};
   ST.onlyNoTime = false;
@@ -673,12 +710,12 @@ export function exportTemplate(){
     owner:'××市人民医院', region:'市区', method:'公开招标', bizType:'标识标牌',
     projType:'货物', industry:'医疗健康', province:'河南省',
     deadline:'2026-11-10', openTime:'2026-11-12', openAddr:'××交易中心 3 号开标室',
-    budget:190, ourPrice:168, bondAmount:3.8, bondStatus:'已缴', perfAmount:16.8, perfStatus:'未缴',
+    budget:1900000, ourPrice:1680000, bondAmount:38000, bondStatus:'已缴', perfAmount:168000, perfStatus:'未缴',
     bondPayDate:'2026-11-05', bondBackDate:'', bondDue:'2027-05-12',
     perfPayDate:'', perfBackDate:'', perfDue:'',
     lead:'张伟', copilot:'陈曦', reviewer:'李静',
     bidStatus:'未开始',
-    docFee:0.08, travelFee:0.24, sampleFee:'',
+    docFee:800, travelFee:2400, sampleFee:'',
     result:'待开标', winner:'', winAmount:'', rank:'', remark:'此行为示例，录入前请删除'
   }];
   const aoa = toMatrix(sample);
@@ -687,7 +724,7 @@ export function exportTemplate(){
   const note = XLSX.utils.aoa_to_sheet([
     ['填写说明'],[''],
     ['1. 一行 = 一个标段。同一项目分多包投标时，每包单独一行，标段/包号填写区分。'],
-    ['2. 金额单位统一为「万元」，只填数字，不要带「万」「元」「¥」；项目开销三项（购买标书费 / 差旅费 / 样品费）同样按万元填。'],
+    ['2. 金额单位统一为「元」，只填数字；项目开销三项（购买标书费 / 差旅费 / 样品费）同样按元填。'],
     ['3. 日期格式 2026-11-12（年-月-日）。'],
     ['4. 开标结果只能填：待开标 / 中标 / 未中标 / 废标 / 流标 / 不投 / 放弃。'],
     ['    「不投」= 报名了但决定不投标，不算废标、不进中标率分母、不计投标数。'],

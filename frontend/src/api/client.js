@@ -29,7 +29,9 @@ export async function api(path, opts){
       const d = await resp.json();
       if(d && typeof d.detail === 'string') msg = d.detail;
     }catch(e){}
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = resp.status;      // 调用方据此判断是否可自动重试（4xx 不重试）
+    throw err;
   }
   return resp.json();
 }
@@ -49,7 +51,9 @@ export async function apiRaw(path, opts){
       const d = await resp.json();
       if(d && typeof d.detail === 'string') msg = d.detail;
     }catch(e){}
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = resp.status;
+    throw err;
   }
   return resp;
 }

@@ -1,16 +1,17 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ST } from '../stores/bid'
+import { ST, bidFiles, filesState } from '../stores/bid'
 import { buildAlerts } from '../lib/alerts'
 import { can, canAgg } from '../stores/perm'
 
 const route = useRoute();
 const router = useRouter();
 
-/* 待处理事项数（待开标 / 标书未准备 / 待缴费 / 待退费），用作侧栏角标 */
+/* 待处理事项数（待开标 / 标书未准备 / 标书未上传 / 待缴费 / 待退费），用作侧栏角标 */
 const pendingCnt = computed(() => buildAlerts(ST.rows, {
-  bid: canAgg('bidStatus'), bond: canAgg('bondStatus'), perf: canAgg('perfStatus'), minor: false
+  bid: canAgg('bidStatus'), bond: canAgg('bondStatus'), perf: canAgg('perfStatus'), minor: false,
+  bidFile: canAgg('bidStatus') && can('view.files') && filesState.loaded, files: bidFiles
 }).length);
 </script>
 

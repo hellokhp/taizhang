@@ -39,6 +39,7 @@ export function ymLabel(from, to){
 }
 export function dd(s){ const d = parseD(s); return d ? Math.round((d - TODAY) / 86400000) : null; }
 export function num(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
-export function fmtMoney(v){ const n = num(v); return n >= 10000 ? (n/10000).toFixed(2) + '亿' : n.toFixed(1) + '万'; }
-export function fmtN(v){ const n = num(v); return n ? n.toLocaleString('zh-CN', {maximumFractionDigits:1}) : '—'; }
+/* 金额统一按元展示，保留两位小数 */
+export function fmtMoney(v){ const n = num(v); return (n ? n.toLocaleString('zh-CN', {maximumFractionDigits:2}) : '0') + ' 元'; }
+export function fmtN(v){ const n = num(v); return n ? n.toLocaleString('zh-CN', {maximumFractionDigits:2}) : '—'; }
 export function uid(){ return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }

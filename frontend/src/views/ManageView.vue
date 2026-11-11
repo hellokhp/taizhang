@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import BidTable from '../components/BidTable.vue'
 import TableConfigDialog from '../components/TableConfigDialog.vue'
-import BidUploadDialog from '../components/BidUploadDialog.vue'
 import { ST, S, leadOpts, methodOpts, filteredCnt, pageCnt, pagedRows,
   resetFilter, pickImportFile, exportXlsx, exportTemplate, openEdit,
   setQuickMonths, setPage, setPageSize, selPageAll, batchDelete,
@@ -190,5 +189,4 @@ const visiblePages = computed(() => {
     </div>
   </div>
   <TableConfigDialog />
-  <BidUploadDialog />
 </template>

@@ -48,6 +48,16 @@ def _conn():
     if conn is None or conn.closed:
         conn = psycopg2.connect(**PG_CONF)
         conn.autocommit = False
+        # 兜底：任何一行被长时间锁住时最多等 8s 就报错，绝不允许无限等待
+        # （等待发生在持全局锁的线程里时，会把整个服务卡死）
+        try:
+            cur = conn.cursor()
+            cur.execute("SET lock_timeout = '8s'")
+            cur.execute("SET statement_timeout = '120s'")
+            cur.close()
+            conn.commit()
+        except Exception:
+            conn.rollback()
         _local.conn = conn
     return conn
 
@@ -239,9 +249,18 @@ def init_db():
           rid TEXT PRIMARY KEY,
           node_id TEXT NOT NULL,
           path TEXT DEFAULT '',
+          tender_node_id TEXT DEFAULT '',
+          bid_node_id TEXT DEFAULT '',
           created_at DOUBLE PRECISION NOT NULL
         );
         ''')
+        # 老库升级：bid_fs_dir 补「招标文件 / 标书」两个子目录的节点 id（幂等）
+        for col in ('tender_node_id', 'bid_node_id'):
+            try:
+                db.execute('ALTER TABLE bid_fs_dir ADD COLUMN ' + col + " TEXT DEFAULT ''")
+                db.commit()
+            except Exception:
+                db.rollback()
         migrate_from_sqlite()
         # 删除墓碑只用于增量同步回放，保留 90 天足够覆盖长期离线客户端，避免表无限增长
         db.execute('DELETE FROM deleted WHERE ts < ?', (time.time() - 90 * 86400,))
@@ -261,14 +280,14 @@ FIELD_CATALOG = [
     ('province', '省份', '项目基础'),
     ('deadline', '投标截止时间', '时间与地点'), ('openTime', '开标时间', '时间与地点'),
     ('openAddr', '开标地点', '时间与地点'),
-    ('budget', '预算/最高限价', '金额与保证金'), ('ourPrice', '我方报价', '金额与保证金'),
-    ('bondAmount', '投标保证金金额', '金额与保证金'), ('bondType', '保证金形式', '金额与保证金'),
+    ('budget', '预算/最高限价（元）', '金额与保证金'), ('ourPrice', '我方报价（元）', '金额与保证金'),
+    ('bondAmount', '投标保证金金额（元）', '金额与保证金'), ('bondType', '保证金形式', '金额与保证金'),
     ('bondStatus', '投标保证金状态', '金额与保证金'),
     ('bondBackDate', '投标保证金退回时间', '金额与保证金'),
     ('bondIssuer', '投标保函开具行/收款单位', '金额与保证金'),
     ('bondNo', '投标保函/凭证编号', '金额与保证金'), ('bondPayDate', '投标缴纳/开具日期', '金额与保证金'),
     ('bondDue', '投标保函有效期', '金额与保证金'),
-    ('perfAmount', '履约保证金金额', '金额与保证金'), ('perfStatus', '履约保证金状态', '金额与保证金'),
+    ('perfAmount', '履约保证金金额（元）', '金额与保证金'), ('perfStatus', '履约保证金状态', '金额与保证金'),
     ('perfBackDate', '履约保证金退回时间', '金额与保证金'),
     ('perfIssuer', '履约保函开具行/收款单位', '金额与保证金'),
     ('perfNo', '履约保函/凭证编号', '金额与保证金'), ('perfPayDate', '履约缴纳/开具日期', '金额与保证金'),
@@ -278,10 +297,10 @@ FIELD_CATALOG = [
     ('bidStatus', '标书状态', '标书进度'), ('bidWaitAt', '未开始时间', '标书进度'),
     ('bidStartAt', '进行中时间', '标书进度'), ('bidEndAt', '已结束时间', '标书进度'),
     ('bidEffort', '标书投入时间', '标书进度'),
-    ('docFee', '购买标书费', '项目开销'), ('travelFee', '差旅费', '项目开销'),
-    ('sampleFee', '样品费', '项目开销'),
+    ('docFee', '购买标书费（元）', '项目开销'), ('travelFee', '差旅费（元）', '项目开销'),
+    ('sampleFee', '样品费（元）', '项目开销'),
     ('result', '开标结果', '开标结果'), ('winner', '中标单位', '开标结果'),
-    ('winAmount', '中标金额', '开标结果'), ('rank', '我方排名', '开标结果'),
+    ('winAmount', '中标金额（元）', '开标结果'), ('rank', '我方排名', '开标结果'),
     ('noticeUrl', '中标公告链接', '开标结果'), ('remark', '备注', '开标结果')
 ]
 FIELD_KEYS = [f[0] for f in FIELD_CATALOG]
@@ -1115,8 +1134,13 @@ def apply_bid_status(payload, old, is_admin):
     return payload, None
 
 
-# ---------------- 投标项目文件目录（bidfile/年/月/项目名） ----------------
+# ---------------- 投标项目文件目录（bidfile/年/月/项目名/招标文件｜标书） ----------------
 BID_DIR_ROOT = 'bidfile'
+BID_SUB_TENDER = '招标文件'      # 招标（投标）过程资料：原「上传项目文件」的去处
+BID_SUB_BID = '标书'             # 标书文件：标书状态改为「已结束」前必须已有文件
+BID_SUB_DIRS = (('tender', BID_SUB_TENDER), ('bid', BID_SUB_BID))
+BID_END_NEED_FILE = ('标书状态改为「已结束」前，请先在项目「标书」目录上传标书文件'
+                     '（无文件上传权限的账号请联系有权限的同事）')
 
 
 def bid_dir_segs(payload):
@@ -1150,12 +1174,34 @@ def bid_upload_roles():
     return out
 
 
+def files_under(node_id):
+    """节点下（含子目录）未删除的文件数。"""
+    if not node_id:
+        return 0
+    return sum(1 for n in fs_core.subtree(node_id) if n['kind'] == 'file' and not n['deleted'])
+
+
+def ensure_child_dir(parent_id, name, who):
+    """在 parent_id 下确保子目录存在（幂等，同层同名不区分大小写复用），返回 node_id。
+    权限从项目目录继承（grant_role 默认 inherit=True），无需重复授权。"""
+    r = db.execute("SELECT id FROM fs_node WHERE parent_id=? AND lower(name)=lower(?) "
+                   "AND kind='dir' AND deleted=0", (parent_id, name)).fetchone()
+    if r:
+        return r['id']
+    nid = fs_core.mkdir(parent_id, name, who)
+    fs_core.fs_log(who, 'mkdir', fs_core.get_node(nid), target='投标项目子目录（自动创建）')
+    return nid
+
+
 def ensure_bid_dir(rid, payload, who):
     """确保投标项目的文件目录存在（幂等），项目改名时同步目录名。
-    调用方须持有 lock；返回 (node_id, 路径)。失败由调用方兜底，不阻断台账保存。"""
+    目录：bidfile / 开标年 / 开标月 / 项目名，其下再分「招标文件」「标书」两个子目录。
+    调用方须持有 lock；返回 {nodeId,path,files,tenderNodeId,tenderPath,tenderFiles,
+    bidNodeId,bidPath,bidFiles}。失败由调用方兜底，不阻断台账保存。"""
     segs = bid_dir_segs(payload)
     want = fs_core.safe_name(segs[-1])
     m = db.execute('SELECT * FROM bid_fs_dir WHERE rid=?', (rid,)).fetchone()
+    node_id = ''
     if m:
         node = fs_core.get_alive(m['node_id'])
         if node:
@@ -1164,19 +1210,35 @@ def ensure_bid_dir(rid, payload, who):
                     fs_core.do_rename(node['id'], want, who)   # 同名冲突则保留旧目录名
                 except Exception:
                     pass
-            path = fs_core.path_of(node['id'])
-            if path != (m['path'] or ''):
-                db.execute('UPDATE bid_fs_dir SET path=? WHERE rid=?', (path, rid))
-            return node['id'], path
-    node_id = fs_core.ensure_path(segs, who)
-    for role, allow in bid_upload_roles():
-        fs_core.grant_role(node_id, role, allow, who)
-    fs_core.fs_log(who, 'mkdir', fs_core.get_node(node_id), target='投标项目目录（自动创建）')
+            node_id = node['id']
+    if not node_id:
+        node_id = fs_core.ensure_path(segs, who)
+        for role, allow in bid_upload_roles():
+            fs_core.grant_role(node_id, role, allow, who)
+        fs_core.fs_log(who, 'mkdir', fs_core.get_node(node_id), target='投标项目目录（自动创建）')
     path = fs_core.path_of(node_id)
-    db.execute('INSERT INTO bid_fs_dir(rid, node_id, path, created_at) VALUES(?,?,?,?) '
-               'ON CONFLICT(rid) DO UPDATE SET node_id=excluded.node_id, path=excluded.path',
-               (rid, node_id, path, time.time()))
-    return node_id, path
+
+    # 子目录：老记录缺列 / 目录被删时自动补建
+    subs = {}
+    for key, name in BID_SUB_DIRS:
+        nid = str((m[key + '_node_id'] if m else '') or '')
+        if nid and not fs_core.get_alive(nid):
+            nid = ''
+        if not nid:
+            nid = ensure_child_dir(node_id, name, who)
+        subs[key] = nid
+
+    db.execute('INSERT INTO bid_fs_dir(rid, node_id, path, tender_node_id, bid_node_id, created_at) '
+               'VALUES(?,?,?,?,?,?) ON CONFLICT(rid) DO UPDATE SET node_id=excluded.node_id, '
+               'path=excluded.path, tender_node_id=excluded.tender_node_id, '
+               'bid_node_id=excluded.bid_node_id',
+               (rid, node_id, path, subs['tender'], subs['bid'], time.time()))
+    return {'rid': rid, 'name': str((payload or {}).get('projectName') or ''),
+            'nodeId': node_id, 'path': path, 'files': files_under(node_id),
+            'tenderNodeId': subs['tender'], 'tenderPath': fs_core.path_of(subs['tender']),
+            'tenderFiles': files_under(subs['tender']),
+            'bidNodeId': subs['bid'], 'bidPath': fs_core.path_of(subs['bid']),
+            'bidFiles': files_under(subs['bid'])}
 
 
 @app.put('/api/rows/{rid}')
@@ -1204,6 +1266,21 @@ def upsert_row(rid: str, body: dict, username: str = Depends(current_user)):
             raise HTTPException(403, bid_err)
         if p['dataScope'] == 'SELF' and not row_in_scope(payload, 'SELF', self_names(username)):
             raise HTTPException(403, '无权操作该数据（数据范围：仅本人相关）')
+        # 标书状态改为「已结束」：项目「标书」目录必须已有文件（新增/补录历史数据不校验）
+        if (old is not None
+                and str(payload.get('bidStatus') or '').strip() == '已结束'
+                and str((old or {}).get('bidStatus') or '').strip() != '已结束'):
+            no_file = False
+            try:
+                no_file = ensure_bid_dir(rid, payload, username)['bidFiles'] <= 0
+            except Exception:
+                no_file = False          # 目录准备失败不阻断保存
+            if no_file:
+                db.commit()              # 自动补建的目录已写入，先提交再拒绝
+                audit_write([(username, rid, 'reject', 'bidStatus',
+                              str((old or {}).get('bidStatus') or ''), '已结束', False)])
+                db.commit()
+                raise HTTPException(400, BID_END_NEED_FILE)
         db.execute(
             'INSERT INTO rows(rid, payload, updated_by, updated_at) VALUES(?,?,?,?) '
             'ON CONFLICT(rid) DO UPDATE SET payload=excluded.payload, '
@@ -1244,8 +1321,8 @@ def delete_row(rid: str, username: str = Depends(current_user)):
 
 @app.get('/api/bid-dir')
 def bid_dir(rid: str = '', username: str = Depends(current_user)):
-    """投标项目对应的文件目录（bidfile/开标年/开标月/项目名）：
-    不存在则按规则创建，返回目录节点 id、路径与文件数（供台账「上传文件」使用）。"""
+    """投标项目对应的文件目录（bidfile/开标年/开标月/项目名/招标文件｜标书）：
+    不存在则按规则创建，返回两个子目录的节点 id、路径与文件数（供台账上传使用）。"""
     need(username, 'view.manage', '无投标管理查看权限')
     rid = str(rid or '').strip()
     if not rid:
@@ -1259,15 +1336,46 @@ def bid_dir(rid: str = '', username: str = Depends(current_user)):
         if p['dataScope'] == 'SELF' and not row_in_scope(payload, 'SELF', self_names(username)):
             raise HTTPException(403, '无权查看该数据（数据范围：仅本人相关）')
         try:
-            node_id, path = ensure_bid_dir(rid, payload, username)
-            cnt = db.execute("SELECT COUNT(*) c FROM fs_node WHERE parent_id=? AND kind='file' "
-                             "AND deleted=0", (node_id,)).fetchone()['c']
+            info = ensure_bid_dir(rid, payload, username)
             db.commit()
         except Exception as e:
             db.rollback()
             raise HTTPException(400, '创建项目目录失败：' + str(e))
-    return {'rid': rid, 'nodeId': node_id, 'path': path, 'files': int(cnt or 0),
-            'name': payload.get('projectName', '')}
+    return info
+
+
+@app.get('/api/bid-files')
+def bid_files(username: str = Depends(current_user)):
+    """各标段「标书」目录下的文件数（rid → 文件数），供「需要处理」判断标书是否已上传。
+    未建过项目目录的标段不返回（前端按 0 处理）；按当前用户数据范围过滤。"""
+    p = perm_of(username)
+    names = self_names(username)
+    with lock:
+        allowed = set()
+        for r in db.execute('SELECT rid, payload FROM rows').fetchall():
+            if p['dataScope'] == 'SELF' and not row_in_scope(json.loads(r['payload']), 'SELF', names):
+                continue
+            allowed.add(str(r['rid']))
+        mapping = {}          # 标书目录节点 id -> rid
+        for m in db.execute("SELECT rid, bid_node_id FROM bid_fs_dir WHERE bid_node_id<>''").fetchall():
+            if str(m['rid']) in allowed:
+                mapping[str(m['bid_node_id'])] = str(m['rid'])
+        files = dict((rid, 0) for rid in mapping.values())
+        if mapping:
+            # 一次递归统计：各「标书」目录（含其子目录）里未删除的文件数
+            for r in db.execute(
+                    'WITH RECURSIVE tree(root, id) AS ('
+                    "  SELECT bid_node_id, bid_node_id FROM bid_fs_dir WHERE bid_node_id<>''"
+                    '  UNION'
+                    '  SELECT t.root, n.id FROM fs_node n JOIN tree t ON n.parent_id = t.id'
+                    '  WHERE n.deleted = 0'
+                    ') SELECT t.root AS root, COUNT(*) AS c FROM tree t'
+                    "  JOIN fs_node f ON f.id = t.id"
+                    "  WHERE f.kind = 'file' AND f.deleted = 0 GROUP BY t.root").fetchall():
+                rid = mapping.get(str(r['root']))
+                if rid:
+                    files[rid] = int(r['c'] or 0)
+    return {'files': files, 'ts': time.time()}
 
 
 @app.post('/api/clear')

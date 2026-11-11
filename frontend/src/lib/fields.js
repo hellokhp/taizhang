@@ -18,11 +18,11 @@ export const F = [
   {k:'deadline',    l:'投标截止时间',    t:'date',   g:'时间与地点'},
   {k:'openTime',    l:'开标时间',        t:'date',   g:'时间与地点', req:1},
   {k:'openAddr',    l:'开标地点',        t:'text',   g:'时间与地点', span:2},
-  {k:'budget',      l:'预算/最高限价（万元）', t:'num', g:'金额与保证金'},
-  {k:'ourPrice',    l:'我方报价（万元）', t:'num',   g:'金额与保证金'},
+  {k:'budget',      l:'预算/最高限价（元）', t:'num', g:'金额与保证金'},
+  {k:'ourPrice',    l:'我方报价（元）', t:'num',   g:'金额与保证金'},
   {k:'bondType',    l:'保证金形式',      t:'select', g:'金额与保证金', opt:['银行转账','银行保函','保险保单','担保公司保函','现金','免缴']},
   /* 投标保证金：金额 / 状态 / 退回时间 同一行，下面一行是投标保函四项 */
-  {k:'bondAmount',  l:'投标保证金金额（万元）', t:'num', g:'金额与保证金'},
+  {k:'bondAmount',  l:'投标保证金金额（元）', t:'num', g:'金额与保证金'},
   {k:'bondStatus',  l:'投标保证金状态',  t:'select', g:'金额与保证金', opt:['无需缴纳','未缴','已缴','已退','不予退还']},
   {k:'bondBackDate',l:'投标保证金退回时间', t:'date', g:'金额与保证金', cl:'投标退回时间'},
   {k:'bondIssuer',  l:'投标保函开具行 / 收款单位', t:'text', g:'金额与保证金', span:3, cl:'投标保函开具行'},
@@ -30,7 +30,7 @@ export const F = [
   {k:'bondPayDate', l:'投标缴纳 / 开具日期', t:'date', g:'金额与保证金', cl:'投标缴纳日期'},
   {k:'bondDue',     l:'投标保函有效期',  t:'date',   g:'金额与保证金', cl:'投标保函有效期'},
   /* 履约保证金：与投标保证金同结构，退回时间与保函四项各自独立 */
-  {k:'perfAmount',  l:'履约保证金金额（万元）', t:'num', g:'金额与保证金'},
+  {k:'perfAmount',  l:'履约保证金金额（元）', t:'num', g:'金额与保证金'},
   {k:'perfStatus',  l:'履约保证金状态',  t:'select', g:'金额与保证金', opt:['无需缴纳','未缴','已缴','已退','不予退还']},
   {k:'perfBackDate',l:'履约保证金退回时间', t:'date', g:'金额与保证金', cl:'履约退回时间'},
   {k:'perfIssuer',  l:'履约保函开具行 / 收款单位', t:'text', g:'金额与保证金', span:3, cl:'履约保函开具行'},
@@ -48,13 +48,13 @@ export const F = [
   {k:'bidStartAt',  l:'进行中时间',      t:'date',   g:'标书进度', ro:1},
   {k:'bidEndAt',    l:'已结束时间',      t:'date',   g:'标书进度', ro:1},
   {k:'bidEffort',   l:'标书投入时间',     t:'num', g:'标书进度', der:1},
-  /* 项目开销：投标过程中的三项直接成本（万元），用于单项目 / 阶段成本核算 */
-  {k:'docFee',      l:'购买标书费（万元）', t:'num', g:'项目开销'},
-  {k:'travelFee',   l:'差旅费（万元）',   t:'num',   g:'项目开销'},
-  {k:'sampleFee',   l:'样品费（万元）',   t:'num',   g:'项目开销'},
+  /* 项目开销：投标过程中的三项直接成本（元），用于单项目 / 阶段成本核算 */
+  {k:'docFee',      l:'购买标书费（元）', t:'num', g:'项目开销'},
+  {k:'travelFee',   l:'差旅费（元）',   t:'num',   g:'项目开销'},
+  {k:'sampleFee',   l:'样品费（元）',   t:'num',   g:'项目开销'},
   {k:'result',      l:'开标结果',        t:'select', g:'开标结果', req:1, opt:['待开标','中标','未中标','废标','流标','不投','放弃']},
   {k:'winner',      l:'中标单位',        t:'text',   g:'开标结果', span:2},
-  {k:'winAmount',   l:'中标金额（万元）', t:'num',   g:'开标结果'},
+  {k:'winAmount',   l:'中标金额（元）', t:'num',   g:'开标结果'},
   {k:'rank',        l:'我方排名',        t:'text',   g:'开标结果', span:2},
   {k:'noticeUrl',   l:'中标公告链接',    t:'text',   g:'开标结果', span:3},
   {k:'remark',      l:'备注',            t:'text',   g:'开标结果', t2:'area', span:3}
@@ -88,32 +88,32 @@ export function S0(o){ return Object.assign({
   result:'待开标',winner:'',winAmount:'',rank:'',noticeUrl:'',remark:''
 }, o); }
 const SAMPLE = [
-  S0({projectName:'市人民医院导视系统升级改造',bidNo:'ZB-2026-0107',agency:'中招国际招标有限公司',owner:'市人民医院',region:'市区',method:'公开招标',deadline:'2026-01-07',openTime:'2026-01-09',budget:210,ourPrice:186,bondAmount:4,bondStatus:'已退',bondPayDate:'2026-01-04',bondBackDate:'2026-03-02',lead:'张伟',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:186,rank:'1'}),
-  S0({projectName:'城投集团VI视觉识别系统',bidNo:'ZB-2026-0115',owner:'城投集团',region:'市区',method:'竞争性磋商',deadline:'2026-02-03',openTime:'2026-02-05',budget:120,ourPrice:108,bondAmount:2,bondStatus:'已退',bondPayDate:'2026-01-28',bondBackDate:'2026-04-10',lead:'李静',copilot:'王磊',reviewer:'张伟',result:'未中标',winner:'华艺设计顾问',rank:'2'}),
-  S0({projectName:'区政务服务中心标识标牌采购',bidNo:'ZB-2026-0203',owner:'区行政审批局',region:'高新区',method:'公开招标',deadline:'2026-03-10',openTime:'2026-03-12',budget:95,ourPrice:82.6,bondAmount:2,bondStatus:'已退',bondPayDate:'2026-03-05',bondBackDate:'2026-05-08',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:82.6,rank:'1'}),
-  S0({projectName:'高速服务区导视改造工程',bidNo:'ZB-2026-0221',owner:'省交投集团',region:'外市',method:'公开招标',deadline:'2026-03-24',openTime:'2026-03-26',budget:340,ourPrice:318,bondAmount:6,bondType:'银行保函',bondStatus:'已退',bondIssuer:'工商银行××分行',bondNo:'BH-2026-0302',bondPayDate:'2026-03-18',bondBackDate:'2026-06-15',bondDue:'2026-07-31',lead:'陈曦',copilot:'张伟',reviewer:'王磊',result:'废标',winner:'',rank:'',remark:'未按格式提供业绩证明'}),
-  S0({projectName:'大学新校区楼体字工程',bidNo:'ZB-2026-0308',owner:'××大学',region:'外市',method:'公开招标',deadline:'2026-04-14',openTime:'2026-04-16',budget:150,ourPrice:142,bondAmount:3,bondStatus:'已退',bondPayDate:'2026-04-08',bondBackDate:'2026-07-02',lead:'张伟',copilot:'李静',reviewer:'陈曦',result:'未中标',winner:'天工标识工程',rank:'3'}),
-  S0({projectName:'地铁站内导向标识一期',bidNo:'ZB-2026-0315',pkg:'一标段',agency:'建元工程咨询有限公司',owner:'市轨道交通集团',region:'市区',method:'公开招标',deadline:'2026-04-26',openTime:'2026-04-28',budget:460,ourPrice:436,bondAmount:8,bondType:'银行保函',bondStatus:'已退',bondIssuer:'招商银行××支行',bondNo:'BH-2026-0411',bondPayDate:'2026-04-20',bondBackDate:'2026-08-11',bondDue:'2026-08-30',lead:'李静',copilot:'王磊',reviewer:'张伟',result:'中标',winner:'本公司',winAmount:436,rank:'1'}),
-  S0({projectName:'农商银行网点门头改造',bidNo:'ZB-2026-0402',owner:'农商银行',region:'市区',method:'框架入围',deadline:'2026-05-12',openTime:'2026-05-14',budget:150,ourPrice:128,bondAmount:3,bondType:'保险保单',bondStatus:'已缴',bondIssuer:'中国人保财险××分公司',bondNo:'PB-2026-0506',bondPayDate:'2026-05-06',bondDue:'2027-05-05',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:128,rank:'1',remark:'框架协议，保证金尚未退还'}),
-  S0({projectName:'文旅景区标识系统提升',bidNo:'ZB-2026-0421',owner:'文旅投资公司',region:'外市',method:'竞争性谈判',deadline:'2026-05-25',openTime:'2026-05-27',budget:88,ourPrice:81,bondAmount:1.5,bondStatus:'已退',bondPayDate:'2026-05-18',bondBackDate:'2026-08-06',lead:'陈曦',copilot:'张伟',reviewer:'王磊',result:'未中标',winner:'卓越环境艺术',rank:'2'}),
-  S0({projectName:'开发区道路指示牌制作安装',bidNo:'ZB-2026-0509',owner:'开发区管委会',region:'高新区',method:'公开招标',deadline:'2026-06-09',openTime:'2026-06-11',budget:110,ourPrice:97.5,bondAmount:2,bondStatus:'已退',bondPayDate:'2026-06-03',bondBackDate:'2026-09-02',lead:'张伟',copilot:'王磊',reviewer:'李静',result:'中标',winner:'本公司',winAmount:97.5,rank:'1'}),
-  S0({projectName:'医院文化墙及宣传栏设计制作',bidNo:'ZB-2026-0518',owner:'市中医院',region:'市区',method:'竞争性磋商',deadline:'2026-06-22',openTime:'2026-06-24',budget:42,ourPrice:38,bondAmount:1,bondStatus:'已退',bondPayDate:'2026-06-16',bondBackDate:'2026-08-20',lead:'李静',copilot:'陈曦',reviewer:'张伟',result:'流标',winner:'',rank:'',remark:'有效供应商不足三家'}),
-  S0({projectName:'商业综合体室内导视系统',bidNo:'ZB-2026-0607',owner:'××置业',region:'市区',method:'邀请招标',deadline:'2026-07-07',openTime:'2026-07-09',budget:260,ourPrice:238,bondAmount:4,bondStatus:'已退',bondPayDate:'2026-07-01',bondBackDate:'2026-10-09',lead:'王磊',copilot:'张伟',reviewer:'陈曦',result:'未中标',winner:'锐视标识科技',rank:'2'}),
-  S0({projectName:'公交站台标识系统更新',bidNo:'ZB-2026-0626',owner:'市公交集团',region:'市区',method:'公开招标',deadline:'2026-07-21',openTime:'2026-07-23',budget:230,ourPrice:214,bondAmount:7,bondStatus:'已退',bondPayDate:'2026-07-15',bondBackDate:'2026-10-14',lead:'陈曦',copilot:'李静',reviewer:'王磊',result:'中标',winner:'本公司',winAmount:214,rank:'1'}),
-  S0({projectName:'学校校园文化标识设计',bidNo:'ZB-2026-0703',owner:'区教育局',region:'高新区',method:'公开招标',deadline:'2026-08-11',openTime:'2026-08-13',budget:76,ourPrice:71,bondAmount:1.5,bondStatus:'已退',bondPayDate:'2026-08-05',bondBackDate:'2026-10-16',lead:'张伟',copilot:'王磊',reviewer:'李静',result:'未中标',winner:'博文文化传播',rank:'2'}),
-  S0({projectName:'政务大厅窗口标识采购',bidNo:'ZB-2026-0725',owner:'区政务服务中心',region:'市区',method:'竞争性磋商',deadline:'2026-08-18',openTime:'2026-08-20',budget:70,ourPrice:63.8,bondAmount:1,bondStatus:'已退',bondPayDate:'2026-08-12',bondBackDate:'2026-10-19',lead:'李静',copilot:'张伟',reviewer:'陈曦',result:'中标',winner:'本公司',winAmount:63.8,rank:'1'}),
-  S0({projectName:'园区智慧导视系统集成',bidNo:'ZB-2026-0806',owner:'××产业园',region:'外市',method:'公开招标',deadline:'2026-09-15',openTime:'2026-09-17',budget:320,ourPrice:305,bondAmount:6,bondType:'银行保函',bondStatus:'已缴',bondIssuer:'建设银行××支行',bondNo:'BH-2026-0909',bondPayDate:'2026-09-09',bondDue:'2026-11-20',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'未中标',winner:'中科智显科技',rank:'2'}),
-  S0({projectName:'集团总部展厅布展及标识',bidNo:'ZB-2026-0822',owner:'××集团',region:'市区',method:'公开招标',deadline:'2026-09-22',openTime:'2026-09-24',budget:420,ourPrice:356,bondAmount:8,bondType:'保险保单',bondStatus:'已缴',bondIssuer:'中国平安财险××支公司',bondNo:'PA-2026-0916',bondPayDate:'2026-09-16',bondDue:'2026-12-31',lead:'陈曦',copilot:'王磊',reviewer:'张伟',result:'中标',winner:'本公司',winAmount:356,rank:'1'}),
-  S0({projectName:'市人民医院标识标牌采购',bidNo:'ZB-2026-0905',agency:'中招国际招标有限公司',owner:'市人民医院',region:'市区',method:'公开招标',deadline:'2026-10-09',openTime:'2026-10-12',budget:190,ourPrice:168,bondAmount:3.8,bondStatus:'已退',bondPayDate:'2026-10-02',bondBackDate:'2026-10-24',lead:'张伟',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:168,rank:'1'}),
-  S0({projectName:'集团园区导视系统改造',bidNo:'ZB-2026-0918',owner:'××集团',region:'市区',method:'公开招标',deadline:'2026-10-19',openTime:'2026-10-21',budget:145,ourPrice:136,bondAmount:2.9,bondStatus:'已缴',bondPayDate:'2026-10-12',lead:'李静',copilot:'王磊',reviewer:'张伟',result:'未中标',winner:'华艺广告有限公司',rank:'2'}),
-  S0({projectName:'区政务中心宣传物料年度采购',bidNo:'ZB-2026-0925',owner:'区政务服务中心',region:'市区',method:'竞争性磋商',deadline:'2026-10-13',openTime:'2026-10-15',budget:60,ourPrice:54,bondAmount:1.2,bondStatus:'已退',bondPayDate:'2026-10-06',bondBackDate:'2026-10-26',lead:'王磊',copilot:'李静',reviewer:'陈曦',result:'未中标',winner:'恒信印务',rank:'3'}),
-  S0({projectName:'地铁二号线导向标识补充',bidNo:'ZB-2026-0930',pkg:'二标段',owner:'市轨道交通集团',region:'市区',method:'公开招标',deadline:'2026-10-17',openTime:'2026-10-19',budget:105,ourPrice:92,bondAmount:2,bondStatus:'已缴',bondPayDate:'2026-10-10',lead:'陈曦',copilot:'张伟',reviewer:'王磊',result:'中标',winner:'本公司',winAmount:92,rank:'1'}),
-  S0({projectName:'商业步行街导视标识改造',bidNo:'ZB-2026-1008',owner:'××街道办',region:'市区',method:'公开招标',deadline:'2026-10-21',openTime:'2026-10-23',budget:80,ourPrice:74,bondAmount:1.5,bondStatus:'已缴',bondPayDate:'2026-10-15',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'未中标',winner:'天工标识工程',rank:'2'}),
-  S0({projectName:'学校楼体字及门牌维护',bidNo:'ZB-2026-1015',owner:'区教育局',region:'高新区',method:'竞争性磋商',deadline:'2026-10-25',openTime:'2026-10-27',budget:36,ourPrice:33,bondAmount:0.8,bondStatus:'已缴',bondPayDate:'2026-10-20',lead:'张伟',copilot:'李静',reviewer:'王磊',result:'待开标',winner:'',rank:''}),
+  S0({projectName:'市人民医院导视系统升级改造',bidNo:'ZB-2026-0107',agency:'中招国际招标有限公司',owner:'市人民医院',region:'市区',method:'公开招标',deadline:'2026-01-07',openTime:'2026-01-09',budget:2100000,ourPrice:1860000,bondAmount:40000,bondStatus:'已退',bondPayDate:'2026-01-04',bondBackDate:'2026-03-02',lead:'张伟',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:1860000,rank:'1'}),
+  S0({projectName:'城投集团VI视觉识别系统',bidNo:'ZB-2026-0115',owner:'城投集团',region:'市区',method:'竞争性磋商',deadline:'2026-02-03',openTime:'2026-02-05',budget:1200000,ourPrice:1080000,bondAmount:20000,bondStatus:'已退',bondPayDate:'2026-01-28',bondBackDate:'2026-04-10',lead:'李静',copilot:'王磊',reviewer:'张伟',result:'未中标',winner:'华艺设计顾问',rank:'2'}),
+  S0({projectName:'区政务服务中心标识标牌采购',bidNo:'ZB-2026-0203',owner:'区行政审批局',region:'高新区',method:'公开招标',deadline:'2026-03-10',openTime:'2026-03-12',budget:950000,ourPrice:826000,bondAmount:20000,bondStatus:'已退',bondPayDate:'2026-03-05',bondBackDate:'2026-05-08',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:826000,rank:'1'}),
+  S0({projectName:'高速服务区导视改造工程',bidNo:'ZB-2026-0221',owner:'省交投集团',region:'外市',method:'公开招标',deadline:'2026-03-24',openTime:'2026-03-26',budget:3400000,ourPrice:3180000,bondAmount:60000,bondType:'银行保函',bondStatus:'已退',bondIssuer:'工商银行××分行',bondNo:'BH-2026-0302',bondPayDate:'2026-03-18',bondBackDate:'2026-06-15',bondDue:'2026-07-31',lead:'陈曦',copilot:'张伟',reviewer:'王磊',result:'废标',winner:'',rank:'',remark:'未按格式提供业绩证明'}),
+  S0({projectName:'大学新校区楼体字工程',bidNo:'ZB-2026-0308',owner:'××大学',region:'外市',method:'公开招标',deadline:'2026-04-14',openTime:'2026-04-16',budget:1500000,ourPrice:1420000,bondAmount:30000,bondStatus:'已退',bondPayDate:'2026-04-08',bondBackDate:'2026-07-02',lead:'张伟',copilot:'李静',reviewer:'陈曦',result:'未中标',winner:'天工标识工程',rank:'3'}),
+  S0({projectName:'地铁站内导向标识一期',bidNo:'ZB-2026-0315',pkg:'一标段',agency:'建元工程咨询有限公司',owner:'市轨道交通集团',region:'市区',method:'公开招标',deadline:'2026-04-26',openTime:'2026-04-28',budget:4600000,ourPrice:4360000,bondAmount:80000,bondType:'银行保函',bondStatus:'已退',bondIssuer:'招商银行××支行',bondNo:'BH-2026-0411',bondPayDate:'2026-04-20',bondBackDate:'2026-08-11',bondDue:'2026-08-30',lead:'李静',copilot:'王磊',reviewer:'张伟',result:'中标',winner:'本公司',winAmount:4360000,rank:'1'}),
+  S0({projectName:'农商银行网点门头改造',bidNo:'ZB-2026-0402',owner:'农商银行',region:'市区',method:'框架入围',deadline:'2026-05-12',openTime:'2026-05-14',budget:1500000,ourPrice:1280000,bondAmount:30000,bondType:'保险保单',bondStatus:'已缴',bondIssuer:'中国人保财险××分公司',bondNo:'PB-2026-0506',bondPayDate:'2026-05-06',bondDue:'2027-05-05',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:1280000,rank:'1',remark:'框架协议，保证金尚未退还'}),
+  S0({projectName:'文旅景区标识系统提升',bidNo:'ZB-2026-0421',owner:'文旅投资公司',region:'外市',method:'竞争性谈判',deadline:'2026-05-25',openTime:'2026-05-27',budget:880000,ourPrice:810000,bondAmount:15000,bondStatus:'已退',bondPayDate:'2026-05-18',bondBackDate:'2026-08-06',lead:'陈曦',copilot:'张伟',reviewer:'王磊',result:'未中标',winner:'卓越环境艺术',rank:'2'}),
+  S0({projectName:'开发区道路指示牌制作安装',bidNo:'ZB-2026-0509',owner:'开发区管委会',region:'高新区',method:'公开招标',deadline:'2026-06-09',openTime:'2026-06-11',budget:1100000,ourPrice:975000,bondAmount:20000,bondStatus:'已退',bondPayDate:'2026-06-03',bondBackDate:'2026-09-02',lead:'张伟',copilot:'王磊',reviewer:'李静',result:'中标',winner:'本公司',winAmount:975000,rank:'1'}),
+  S0({projectName:'医院文化墙及宣传栏设计制作',bidNo:'ZB-2026-0518',owner:'市中医院',region:'市区',method:'竞争性磋商',deadline:'2026-06-22',openTime:'2026-06-24',budget:420000,ourPrice:380000,bondAmount:10000,bondStatus:'已退',bondPayDate:'2026-06-16',bondBackDate:'2026-08-20',lead:'李静',copilot:'陈曦',reviewer:'张伟',result:'流标',winner:'',rank:'',remark:'有效供应商不足三家'}),
+  S0({projectName:'商业综合体室内导视系统',bidNo:'ZB-2026-0607',owner:'××置业',region:'市区',method:'邀请招标',deadline:'2026-07-07',openTime:'2026-07-09',budget:2600000,ourPrice:2380000,bondAmount:40000,bondStatus:'已退',bondPayDate:'2026-07-01',bondBackDate:'2026-10-09',lead:'王磊',copilot:'张伟',reviewer:'陈曦',result:'未中标',winner:'锐视标识科技',rank:'2'}),
+  S0({projectName:'公交站台标识系统更新',bidNo:'ZB-2026-0626',owner:'市公交集团',region:'市区',method:'公开招标',deadline:'2026-07-21',openTime:'2026-07-23',budget:2300000,ourPrice:2140000,bondAmount:70000,bondStatus:'已退',bondPayDate:'2026-07-15',bondBackDate:'2026-10-14',lead:'陈曦',copilot:'李静',reviewer:'王磊',result:'中标',winner:'本公司',winAmount:2140000,rank:'1'}),
+  S0({projectName:'学校校园文化标识设计',bidNo:'ZB-2026-0703',owner:'区教育局',region:'高新区',method:'公开招标',deadline:'2026-08-11',openTime:'2026-08-13',budget:760000,ourPrice:710000,bondAmount:15000,bondStatus:'已退',bondPayDate:'2026-08-05',bondBackDate:'2026-10-16',lead:'张伟',copilot:'王磊',reviewer:'李静',result:'未中标',winner:'博文文化传播',rank:'2'}),
+  S0({projectName:'政务大厅窗口标识采购',bidNo:'ZB-2026-0725',owner:'区政务服务中心',region:'市区',method:'竞争性磋商',deadline:'2026-08-18',openTime:'2026-08-20',budget:700000,ourPrice:638000,bondAmount:10000,bondStatus:'已退',bondPayDate:'2026-08-12',bondBackDate:'2026-10-19',lead:'李静',copilot:'张伟',reviewer:'陈曦',result:'中标',winner:'本公司',winAmount:638000,rank:'1'}),
+  S0({projectName:'园区智慧导视系统集成',bidNo:'ZB-2026-0806',owner:'××产业园',region:'外市',method:'公开招标',deadline:'2026-09-15',openTime:'2026-09-17',budget:3200000,ourPrice:3050000,bondAmount:60000,bondType:'银行保函',bondStatus:'已缴',bondIssuer:'建设银行××支行',bondNo:'BH-2026-0909',bondPayDate:'2026-09-09',bondDue:'2026-11-20',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'未中标',winner:'中科智显科技',rank:'2'}),
+  S0({projectName:'集团总部展厅布展及标识',bidNo:'ZB-2026-0822',owner:'××集团',region:'市区',method:'公开招标',deadline:'2026-09-22',openTime:'2026-09-24',budget:4200000,ourPrice:3560000,bondAmount:80000,bondType:'保险保单',bondStatus:'已缴',bondIssuer:'中国平安财险××支公司',bondNo:'PA-2026-0916',bondPayDate:'2026-09-16',bondDue:'2026-12-31',lead:'陈曦',copilot:'王磊',reviewer:'张伟',result:'中标',winner:'本公司',winAmount:3560000,rank:'1'}),
+  S0({projectName:'市人民医院标识标牌采购',bidNo:'ZB-2026-0905',agency:'中招国际招标有限公司',owner:'市人民医院',region:'市区',method:'公开招标',deadline:'2026-10-09',openTime:'2026-10-12',budget:1900000,ourPrice:1680000,bondAmount:38000,bondStatus:'已退',bondPayDate:'2026-10-02',bondBackDate:'2026-10-24',lead:'张伟',copilot:'陈曦',reviewer:'李静',result:'中标',winner:'本公司',winAmount:1680000,rank:'1'}),
+  S0({projectName:'集团园区导视系统改造',bidNo:'ZB-2026-0918',owner:'××集团',region:'市区',method:'公开招标',deadline:'2026-10-19',openTime:'2026-10-21',budget:1450000,ourPrice:1360000,bondAmount:29000,bondStatus:'已缴',bondPayDate:'2026-10-12',lead:'李静',copilot:'王磊',reviewer:'张伟',result:'未中标',winner:'华艺广告有限公司',rank:'2'}),
+  S0({projectName:'区政务中心宣传物料年度采购',bidNo:'ZB-2026-0925',owner:'区政务服务中心',region:'市区',method:'竞争性磋商',deadline:'2026-10-13',openTime:'2026-10-15',budget:600000,ourPrice:540000,bondAmount:12000,bondStatus:'已退',bondPayDate:'2026-10-06',bondBackDate:'2026-10-26',lead:'王磊',copilot:'李静',reviewer:'陈曦',result:'未中标',winner:'恒信印务',rank:'3'}),
+  S0({projectName:'地铁二号线导向标识补充',bidNo:'ZB-2026-0930',pkg:'二标段',owner:'市轨道交通集团',region:'市区',method:'公开招标',deadline:'2026-10-17',openTime:'2026-10-19',budget:1050000,ourPrice:920000,bondAmount:20000,bondStatus:'已缴',bondPayDate:'2026-10-10',lead:'陈曦',copilot:'张伟',reviewer:'王磊',result:'中标',winner:'本公司',winAmount:920000,rank:'1'}),
+  S0({projectName:'商业步行街导视标识改造',bidNo:'ZB-2026-1008',owner:'××街道办',region:'市区',method:'公开招标',deadline:'2026-10-21',openTime:'2026-10-23',budget:800000,ourPrice:740000,bondAmount:15000,bondStatus:'已缴',bondPayDate:'2026-10-15',lead:'王磊',copilot:'陈曦',reviewer:'李静',result:'未中标',winner:'天工标识工程',rank:'2'}),
+  S0({projectName:'学校楼体字及门牌维护',bidNo:'ZB-2026-1015',owner:'区教育局',region:'高新区',method:'竞争性磋商',deadline:'2026-10-25',openTime:'2026-10-27',budget:360000,ourPrice:330000,bondAmount:8000,bondStatus:'已缴',bondPayDate:'2026-10-20',lead:'张伟',copilot:'李静',reviewer:'王磊',result:'待开标',winner:'',rank:''}),
   S0({projectName:'某新区党群服务中心标识采购',bidNo:'ZB-2026-1021',agency:'中招国际招标有限公司',owner:'新区管委会',region:'高新区',method:'公开招标',openTime:'2026-10-29',bondStatus:'无需缴纳',result:'不投',lead:'',remark:'已报名，因工期冲突决定不投（不计入投标数与废标率）'}),
-  S0({projectName:'政务中心形象墙设计施工',bidNo:'ZB-2026-1019',owner:'区行政审批局',region:'市区',method:'竞争性磋商',deadline:'2026-10-27',openTime:'2026-10-29',budget:48,ourPrice:44,bondAmount:1,bondStatus:'未缴',lead:'王磊',copilot:'张伟',reviewer:'陈曦',result:'待开标',winner:'',rank:''}),
-  S0({projectName:'城市书房标识配置',bidNo:'ZB-2026-1021',owner:'市文旅局',region:'市区',method:'公开招标',deadline:'2026-10-29',openTime:'2026-10-30',budget:52,ourPrice:47,bondAmount:1,bondStatus:'已缴',bondPayDate:'2026-10-22',lead:'李静',copilot:'陈曦',reviewer:'王磊',result:'待开标',winner:'',rank:''}),
-  S0({projectName:'银行网点标识年度框架',bidNo:'ZB-2026-1022',owner:'××银行分行',region:'市区',method:'框架入围',deadline:'2026-11-10',openTime:'2026-11-12',budget:180,ourPrice:0,bondAmount:0,bondStatus:'无需缴纳',lead:'张伟',copilot:'王磊',reviewer:'李静',result:'待开标',winner:'',rank:''})
+  S0({projectName:'政务中心形象墙设计施工',bidNo:'ZB-2026-1019',owner:'区行政审批局',region:'市区',method:'竞争性磋商',deadline:'2026-10-27',openTime:'2026-10-29',budget:480000,ourPrice:440000,bondAmount:10000,bondStatus:'未缴',lead:'王磊',copilot:'张伟',reviewer:'陈曦',result:'待开标',winner:'',rank:''}),
+  S0({projectName:'城市书房标识配置',bidNo:'ZB-2026-1021',owner:'市文旅局',region:'市区',method:'公开招标',deadline:'2026-10-29',openTime:'2026-10-30',budget:520000,ourPrice:470000,bondAmount:10000,bondStatus:'已缴',bondPayDate:'2026-10-22',lead:'李静',copilot:'陈曦',reviewer:'王磊',result:'待开标',winner:'',rank:''}),
+  S0({projectName:'银行网点标识年度框架',bidNo:'ZB-2026-1022',owner:'××银行分行',region:'市区',method:'框架入围',deadline:'2026-11-10',openTime:'2026-11-12',budget:1800000,ourPrice:0,bondAmount:0,bondStatus:'无需缴纳',lead:'张伟',copilot:'王磊',reviewer:'李静',result:'待开标',winner:'',rank:''})
 ];
 export { SAMPLE };
 
@@ -229,7 +229,7 @@ export const ALIAS = {
  '差旅费':'travelFee','差旅':'travelFee','差旅费用':'travelFee','交通差旅费':'travelFee','出差费':'travelFee',
  '样品费':'sampleFee','样品费用':'sampleFee','打样费':'sampleFee','样品制作费':'sampleFee',
  '中标人':'winner','中标供应商':'winner','中标方':'winner','中标企业':'winner','中标公司':'winner',
- '中标金额':'winAmount','中标价':'winAmount','中标金额(万元)':'winAmount',
+ '中标金额':'winAmount','中标价':'winAmount','中标金额(元)':'winAmount','中标金额（元）':'winAmount',
  '排名':'rank','名次':'rank',
  '公告链接':'noticeUrl','中标公告链接':'noticeUrl','中标公示链接':'noticeUrl','结果公告链接':'noticeUrl','公告网址':'noticeUrl','链接':'noticeUrl',
  '备注':'remark','说明':'remark','业务类型':'bizType','类型':'bizType'
@@ -278,7 +278,7 @@ export function normBondType(v){
 export function normNum(v){
   if(v == null || v === '') return '';
   if(typeof v === 'number') return Math.round(v*100)/100;
-  const s = String(v).replace(/[¥￥,\s]/g,'').replace(/万元|万/g,'');
+  const s = String(v).replace(/[¥￥,\s]/g,'').replace(/元/g,'');
   const m = s.match(/-?\d+(\.\d+)?/);
   return m ? Math.round(parseFloat(m[0])*100)/100 : '';
 }
