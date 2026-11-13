@@ -1,3 +1,4 @@
 fastapi
 uvicorn[standard]
 psycopg2-binary
+redis>=4.2

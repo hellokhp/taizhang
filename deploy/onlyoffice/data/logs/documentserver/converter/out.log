@@ -1,4 +1,0 @@
-[2026-11-09T06:48:28.624] [WARN] [localhost] [docId] [userId] nodeJS - convertermaster: memory runtime detected - embedded converter runs inside DocService; no workers will be forked
-[2026-11-09T06:50:57.338] [WARN] [localhost] [docId] [userId] nodeJS - convertermaster: memory runtime detected - embedded converter runs inside DocService; no workers will be forked
-[2026-11-09T07:02:50.705] [WARN] [localhost] [docId] [userId] nodeJS - convertermaster: memory runtime detected - embedded converter runs inside DocService; no workers will be forked
-[2026-11-09T07:05:00.653] [WARN] [localhost] [docId] [userId] nodeJS - convertermaster: memory runtime detected - embedded converter runs inside DocService; no workers will be forked

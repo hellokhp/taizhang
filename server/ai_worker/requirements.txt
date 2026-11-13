@@ -1,0 +1,17 @@
+# 文档解析 / 模型调用（来自 AI 工具原 requirements.txt）
+pdfplumber>=0.11
+PyMuPDF>=1.24
+python-docx>=1.1
+openpyxl>=3.1
+xlrd>=2.0
+openai>=1.40
+tenacity>=9.0
+python-dotenv>=1.0
+python-dateutil>=2.8
+cn2an>=0.5
+py7zr>=0.20
+rarfile>=4.0
+
+# Worker 专用：直连 PG 与 Redis 信号层
+psycopg2-binary>=2.9
+redis>=4.2

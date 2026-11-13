@@ -47,6 +47,10 @@ const pendingCnt = computed(() => buildAlerts(ST.rows, {
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.8 4.2c0-.9.7-1.6 1.6-1.6h2.5l1.4 1.7h5c.9 0 1.6.7 1.6 1.6v6.3c0 .9-.7 1.6-1.6 1.6H3.4c-.9 0-1.6-.7-1.6-1.6V4.2Z"/><path d="M1.8 7.4h12.4"/></svg>
       文件存储
     </button>
+    <button v-if="can('view.aiSummary')" :class="{on: route.path === '/ai-summary'}" @click="router.push('/ai-summary')">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.4" width="12" height="11.2" rx="1.6"/><path d="M2 6h12M5.6 6v7.6"/><path d="M8 9.2h3.4M8 11.4h2.2"/></svg>
+      开标汇总
+    </button>
     <button v-if="can('view.users')" :class="{on: route.path === '/users'}" @click="router.push('/users')">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 13.8c.7-2.7 2.9-4.2 5.4-4.2s4.7 1.5 5.4 4.2"/></svg>
       用户管理

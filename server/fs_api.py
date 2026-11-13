@@ -21,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import fs
 from . import fs_office
+from . import guard
 
 
 def _op_action(op):
@@ -727,6 +728,7 @@ def build_router(current_user):
 
     @router.post('/upload/complete')
     @_wrap
+    @guard.heavy('文件合并')
     def upload_complete(body: CompleteIn, request: Request, username: str = Depends(current_user)):
         with fs.lock():
             s = fs.db().execute('SELECT * FROM fs_upload WHERE id=?', (body.uploadId,)).fetchone()

@@ -1,27 +1,22 @@
-[2026-11-09T06:48:29.265] [WARN] [localhost] [docId] [userId] nodeJS - Express server starting...
-[2026-11-09T06:48:29.267] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T06:48:29.268] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T06:48:29.303] [WARN] [localhost] [docId] [userId] nodeJS - Express server listening on port 8000 in production-linux mode. Version: 9.4.0. Build: 129
-[2026-11-09T06:48:29.307] [WARN] [localhost] [docId] [userId] nodeJS - embedded converter started
-[2026-11-09T06:50:56.025] [WARN] [localhost] [docId] [userId] nodeJS - Express server starting...
-[2026-11-09T06:50:56.027] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T06:50:56.027] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T06:50:56.051] [WARN] [localhost] [docId] [userId] nodeJS - Express server listening on port 8000 in production-linux mode. Version: 9.4.0. Build: 129
-[2026-11-09T06:50:56.055] [WARN] [localhost] [docId] [userId] nodeJS - embedded converter started
-[2026-11-09T06:56:38.849] [WARN] [localhost] [019a5516f8e79033-4] [userId] nodeJS - checkJwt error: name = JsonWebTokenError message = invalid signature token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ3aWR0aCI6IjEwMCUiLCJoZWlnaHQiOiIxMDAlIiwiZG9jdW1lbnRUeXBlIjoiY2VsbCIsImRvY3VtZW50Ijp7ImZpbGVUeXBlIjoieGxzeCIsInRpdGxlIjoiXHU4ZDQ0XHU0ZWE3XHU1YmZjXHU1MTY1XHU2YTIxXHU2NzdmIChcdTk1N2ZcdTZjOTkpLnhsc3giLCJrZXkiOiIwMTlhNTUxNmY4ZTc5MDMzLTQiLCJ1cmwiOiJodHRwOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWwvYXBpL2ZzL29mZmljZS9maWxlP3NpZz12aWV3JTdDNDk5YzhkODVhZmUwNGE5YTk2MWFjNmM1YjU0ZjRhNDElN0NhZG1pbiU3QzQlN0MxNzk0MjM2MTk3JTdDOWY1YTQ4ZDM2MWM1N2UyMGYxZDkwY2I5MzYzYjE2MzIiLCJwZXJtaXNzaW9ucyI6eyJlZGl0Ijp0cnVlLCJkb3dubG9hZCI6dHJ1ZSwicHJpbnQiOnRydWV9fSwiZWRpdG9yQ29uZmlnIjp7Im1vZGUiOiJlZGl0IiwibGFuZyI6InpoLUNOIiwiY2FsbGJhY2tVcmwiOiJodHRwOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWwvYXBpL2ZzL29mZmljZS9jYWxsYmFjaz9zaWc9Y2IlN0M0OTljOGQ4NWFmZTA0YTlhOTYxYWM2YzViNTRmNGE0MSU3Q2FkbWluJTdDNCU3QzE3OTQyOTM3OTclN0NhMjkwZWVmNmQ0N2ExNzlhYWNkN2EyNDVkZjIyOWY4YyIsInVzZXIiOnsiaWQiOiJhZG1pbiIsIm5hbWUiOiJcdTdiYTFcdTc0MDZcdTU0NTgifSwiY3VzdG9taXphdGlvbiI6eyJmb3JjZXNhdmUiOnRydWUsImF1dG9zYXZlIjp0cnVlLCJjb21wYWN0SGVhZGVyIjp0cnVlLCJoaWRlUmlnaHRNZW51Ijp0cnVlLCJhYm91dCI6ZmFsc2UsImZlZWRiYWNrIjpmYWxzZSwiaGVscCI6ZmFsc2V9fX0.Jv6tjKwSahsZdRs5nmnrEPNo_swaPBlfHRLPs4OowmY
-[2026-11-09T06:56:51.936] [WARN] [localhost] [019a5516f8e79033-4] [userId] nodeJS - checkJwt error: name = JsonWebTokenError message = invalid signature token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ3aWR0aCI6IjEwMCUiLCJoZWlnaHQiOiIxMDAlIiwiZG9jdW1lbnRUeXBlIjoiY2VsbCIsImRvY3VtZW50Ijp7ImZpbGVUeXBlIjoieGxzeCIsInRpdGxlIjoiXHU4ZDQ0XHU0ZWE3XHU1YmZjXHU1MTY1XHU2YTIxXHU2NzdmIChcdTk1N2ZcdTZjOTkpLnhsc3giLCJrZXkiOiIwMTlhNTUxNmY4ZTc5MDMzLTQiLCJ1cmwiOiJodHRwOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWwvYXBpL2ZzL29mZmljZS9maWxlP3NpZz12aWV3JTdDNDk5YzhkODVhZmUwNGE5YTk2MWFjNmM1YjU0ZjRhNDElN0NhZG1pbiU3QzQlN0MxNzk0MjM2MjExJTdDMDQ5NzkwYWQwNWMxMDFlNjM1M2NiODIwOWM3ZWRkYzYiLCJwZXJtaXNzaW9ucyI6eyJlZGl0Ijp0cnVlLCJkb3dubG9hZCI6dHJ1ZSwicHJpbnQiOnRydWV9fSwiZWRpdG9yQ29uZmlnIjp7Im1vZGUiOiJlZGl0IiwibGFuZyI6InpoLUNOIiwiY2FsbGJhY2tVcmwiOiJodHRwOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWwvYXBpL2ZzL29mZmljZS9jYWxsYmFjaz9zaWc9Y2IlN0M0OTljOGQ4NWFmZTA0YTlhOTYxYWM2YzViNTRmNGE0MSU3Q2FkbWluJTdDNCU3QzE3OTQyOTM4MTElN0MzZjA0N2M3ZTRjY2ExNjU1ZGE0NDQ2YWE4ZjhiODlhMiIsInVzZXIiOnsiaWQiOiJhZG1pbiIsIm5hbWUiOiJcdTdiYTFcdTc0MDZcdTU0NTgifSwiY3VzdG9taXphdGlvbiI6eyJmb3JjZXNhdmUiOnRydWUsImF1dG9zYXZlIjp0cnVlLCJjb21wYWN0SGVhZGVyIjp0cnVlLCJoaWRlUmlnaHRNZW51Ijp0cnVlLCJhYm91dCI6ZmFsc2UsImZlZWRiYWNrIjpmYWxzZSwiaGVscCI6ZmFsc2V9fX0.k9ZLBy9yqX55QC8a78GIVOZXq3hG2dCXJXZ8ITSisDM
-[2026-11-09T06:57:32.591] [WARN] [localhost] [019a5516f8e79033-4] [userId] nodeJS - checkJwt error: name = JsonWebTokenError message = invalid signature token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ3aWR0aCI6IjEwMCUiLCJoZWlnaHQiOiIxMDAlIiwiZG9jdW1lbnRUeXBlIjoiY2VsbCIsImRvY3VtZW50Ijp7ImZpbGVUeXBlIjoieGxzeCIsInRpdGxlIjoiXHU4ZDQ0XHU0ZWE3XHU1YmZjXHU1MTY1XHU2YTIxXHU2NzdmIChcdTk1N2ZcdTZjOTkpLnhsc3giLCJrZXkiOiIwMTlhNTUxNmY4ZTc5MDMzLTQiLCJ1cmwiOiJodHRwOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWwvYXBpL2ZzL29mZmljZS9maWxlP3NpZz12aWV3JTdDNDk5YzhkODVhZmUwNGE5YTk2MWFjNmM1YjU0ZjRhNDElN0NhZG1pbiU3QzQlN0MxNzk0MjM2MjUyJTdDODI4MjgwZjcyNTJmZjI5MmQ5MzhlZWYxMjVkMWJjNDkiLCJwZXJtaXNzaW9ucyI6eyJlZGl0Ijp0cnVlLCJkb3dubG9hZCI6dHJ1ZSwicHJpbnQiOnRydWV9fSwiZWRpdG9yQ29uZmlnIjp7Im1vZGUiOiJlZGl0IiwibGFuZyI6InpoLUNOIiwiY2FsbGJhY2tVcmwiOiJodHRwOi8vaG9zdC5kb2NrZXIuaW50ZXJuYWwvYXBpL2ZzL29mZmljZS9jYWxsYmFjaz9zaWc9Y2IlN0M0OTljOGQ4NWFmZTA0YTlhOTYxYWM2YzViNTRmNGE0MSU3Q2FkbWluJTdDNCU3QzE3OTQyOTM4NTIlN0M2YjI5ODQzMGNjNTJiMjcwMjQ0NTBjY2U5ZTIxYjI3OCIsInVzZXIiOnsiaWQiOiJhZG1pbiIsIm5hbWUiOiJcdTdiYTFcdTc0MDZcdTU0NTgifSwiY3VzdG9taXphdGlvbiI6eyJmb3JjZXNhdmUiOnRydWUsImF1dG9zYXZlIjp0cnVlLCJjb21wYWN0SGVhZGVyIjp0cnVlLCJoaWRlUmlnaHRNZW51Ijp0cnVlLCJhYm91dCI6ZmFsc2UsImZlZWRiYWNrIjpmYWxzZSwiaGVscCI6ZmFsc2V9fX0.BHEnW2hi8wkE5Vw5YcnoNtDaBSUWaO8oPZVgVfSeuTM
-[2026-11-09T07:02:40.647] [WARN] [localhost] [docId] [userId] nodeJS - start shutdown:true
-[2026-11-09T07:02:40.648] [WARN] [localhost] [docId] [userId] nodeJS - active connections: 0
-[2026-11-09T07:02:40.648] [WARN] [localhost] [docId] [userId] nodeJS - end shutdown
-[2026-11-09T07:02:51.493] [WARN] [localhost] [docId] [userId] nodeJS - Express server starting...
-[2026-11-09T07:02:51.496] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T07:02:51.496] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T07:02:51.530] [WARN] [localhost] [docId] [userId] nodeJS - Express server listening on port 8000 in production-linux mode. Version: 9.4.0. Build: 129
-[2026-11-09T07:02:51.531] [WARN] [localhost] [docId] [userId] nodeJS - embedded converter started
-[2026-11-09T07:04:59.292] [WARN] [localhost] [docId] [userId] nodeJS - Express server starting...
-[2026-11-09T07:04:59.295] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T07:04:59.295] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
-[2026-11-09T07:04:59.318] [WARN] [localhost] [docId] [userId] nodeJS - Express server listening on port 8000 in production-linux mode. Version: 9.4.0. Build: 129
-[2026-11-09T07:04:59.322] [WARN] [localhost] [docId] [userId] nodeJS - embedded converter started
-[2026-11-10T07:04:55.205] [WARN] [localhost] [docId] [userId] nodeJS - notifyLicenseExpiration(): expiration date is not defined
+[2026-11-13T07:33:25.586] [ERROR] [localhost] [bc214c8ad0b3cbdd-1] [康雅爽] nodeJS - error downloadFile:url=http://host.docker.internal:8000/api/fs/office/file?sig=view%7C4cead7c1d0f64b929c7a131d743f321c%7C%E5%BA%B7%E9%9B%85%E7%88%BD%7C1%7C1794583996%7Cd87c9a1a9e93ff539592c0a79b8e5a1a;attempt=1;code:EMSGSIZE;connect:undefined Error: EMSGSIZE: Response too large: 104858815 bytes (limit: 104857600 bytes)
+    at SizeLimitStream._transform (/snapshot/server/Common/sources/utils.js)
+    at Transform._write (node:internal/streams/transform:171:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at IncomingMessage.ondata (node:internal/streams/readable:1009:22)
+    at IncomingMessage.emit (node:events:524:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)
+[2026-11-13T07:33:37.559] [ERROR] [localhost] [bc214c8ad0b3cbdd-1] [康雅爽] nodeJS - error downloadFile:url=http://host.docker.internal:8000/api/fs/office/file?sig=view%7C4cead7c1d0f64b929c7a131d743f321c%7C%E5%BA%B7%E9%9B%85%E7%88%BD%7C1%7C1794584010%7C30bfce097666f438f1ff4087b3f240ed;attempt=1;code:EMSGSIZE;connect:undefined Error: EMSGSIZE: Response too large: 104859013 bytes (limit: 104857600 bytes)
+    at SizeLimitStream._transform (/snapshot/server/Common/sources/utils.js)
+    at Transform._write (node:internal/streams/transform:171:8)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at IncomingMessage.ondata (node:internal/streams/readable:1009:22)
+    at IncomingMessage.emit (node:events:524:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)

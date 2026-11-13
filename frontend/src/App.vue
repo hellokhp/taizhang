@@ -15,7 +15,7 @@ import { auth, logout } from './stores/auth'
 import { um } from './stores/users'
 
 const route = useRoute();
-const pageTitle = computed(() => ({'/':'首页看板','/manage':'投标管理','/timeline':'标源总览','/assign':'项目分配表','/alerts':'需要处理','/files':'文件存储','/users':'用户管理','/roles':'角色权限','/audit':'审计日志','/reports':'工作日报','/profile':'个人中心'}[route.path] || ''));
+const pageTitle = computed(() => ({'/':'首页看板','/manage':'投标管理','/timeline':'标源总览','/assign':'项目分配表','/alerts':'需要处理','/files':'文件存储','/ai-summary':'开标汇总','/users':'用户管理','/roles':'角色权限','/audit':'审计日志','/reports':'工作日报','/profile':'个人中心'}[route.path] || ''));
 
 function onKey(e){
   if(e.key === 'Escape'){

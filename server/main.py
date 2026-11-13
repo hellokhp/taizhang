@@ -25,6 +25,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from . import guard
+
 BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent
 DB_PATH = BASE / 'data.db'          # 历史 SQLite 数据文件（仅用于一次性迁移，迁移后作为回滚备份保留）
@@ -38,7 +40,9 @@ PG_CONF = {
     'dbname': os.environ.get('PG_DB', 'yadecai'),
 }
 
-lock = threading.RLock()
+# 平台卡死治理：全局锁带等待上限（默认 3s），超时返回 503 而不是无限排队。
+# 可重入性必须保留；纯读路径用 guard.unlocked()，慢写用 guard.keyed() + tx()。
+lock = guard.TimedRLock()
 _local = threading.local()
 
 
@@ -48,16 +52,23 @@ def _conn():
     if conn is None or conn.closed:
         conn = psycopg2.connect(**PG_CONF)
         conn.autocommit = False
-        # 兜底：任何一行被长时间锁住时最多等 8s 就报错，绝不允许无限等待
-        # （等待发生在持全局锁的线程里时，会把整个服务卡死）
-        try:
-            cur = conn.cursor()
-            cur.execute("SET lock_timeout = '8s'")
-            cur.execute("SET statement_timeout = '120s'")
-            cur.close()
-            conn.commit()
-        except Exception:
-            conn.rollback()
+        # 平台卡死治理 第 1 步：前台连接一律设上限，绝不允许无限等待 / 无限挂起。
+        #   lock_timeout                      3s   行锁等待，超时立即报错而非拖住全站
+        #   statement_timeout                 10s  单条慢 SQL 自动终止（PG 是逐语句计时，
+        #                                        逐行写的大导入不受影响）
+        #   idle_in_transaction_session...   30s  开事务不干活的连接自动断开
+        # 逐条 SET + 逐条提交：老版本 PG 不支持某一条时，一次 rollback 不会把
+        # 前面已生效的设置一起撤销。Worker 连接独立设 300s，见 ai_worker/db.py。
+        cur = conn.cursor()
+        for sql in ("SET lock_timeout = '3s'",
+                    "SET statement_timeout = '10s'",
+                    "SET idle_in_transaction_session_timeout = '30s'"):
+            try:
+                cur.execute(sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        cur.close()
         _local.conn = conn
     return conn
 
@@ -317,6 +328,10 @@ PERM_CATALOG = [
     ('view.roles', '角色与权限', '页面'),
     ('view.audit', '审计日志', '页面'),
     ('view.files', '文件存储', '页面'),
+    ('view.aiSummary', '开标汇总', '页面'),
+    ('ai.generate', '开标汇总 · 生成/复核/重试', '操作'),
+    ('ai.confirm', '开标汇总 · 定稿', '操作'),
+    ('ai.layout', '开标汇总 · 布局管理', '操作'),
     ('bid.edit', '台账 · 新增/编辑', '操作'),
     ('bid.delete', '台账 · 删除', '操作'),
     ('bid.import', '台账 · 导入', '操作'),
@@ -345,13 +360,16 @@ _ALL_FIELDS_READONLY = {k: {'level': 'readonly', 'mask': 'full'} for k in FIELD_
 
 ROLE_SEEDS = [
     ('manager', '投标经理', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
-                             'view.audit': 1, 'view.files': 1, 'bid.edit': 1, 'bid.delete': 1, 'bid.import': 1,
+                             'view.audit': 1, 'view.files': 1, 'view.aiSummary': 1, 'ai.generate': 1, 'ai.confirm': 1, 'ai.layout': 1,
+                             'bid.edit': 1, 'bid.delete': 1, 'bid.import': 1,
                              'bid.export': 1, 'file.admin': 1, 'report.viewOthers': 1}, {}, 'ALL'),
     ('staff', '投标专员', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
-                           'view.audit': 0, 'view.files': 1, 'bid.edit': 1, 'bid.delete': 0, 'bid.import': 1,
+                           'view.audit': 0, 'view.files': 1, 'view.aiSummary': 1, 'ai.generate': 1, 'ai.confirm': 1, 'ai.layout': 0,
+                           'bid.edit': 1, 'bid.delete': 0, 'bid.import': 1,
                            'bid.export': 1, 'file.admin': 0, 'report.viewOthers': 0}, {}, 'ALL'),
     ('viewer', '只读查看', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
-                            'view.audit': 0, 'view.files': 1, 'bid.edit': 0, 'bid.delete': 0, 'bid.import': 0,
+                            'view.audit': 0, 'view.files': 1, 'view.aiSummary': 1, 'ai.generate': 0, 'ai.confirm': 0, 'ai.layout': 0,
+                            'bid.edit': 0, 'bid.delete': 0, 'bid.import': 0,
                             'bid.export': 0, 'file.admin': 0, 'report.viewOthers': 0}, _ALL_FIELDS_READONLY, 'ALL'),
 ]
 
@@ -376,8 +394,11 @@ def backfill_role_perms():
     """新增页面权限时给存量角色补默认值：跟随该角色「投标管理」页的开关，一次性补齐。
     view.files 跟随 view.manage（能进台账就能进文件存储）；file.admin 跟随 view.audit；
     report.viewOthers 跟随 view.audit（管理属性权限，默认仅管理层可看他人日报）。"""
-    page_perms = ('view.timeline', 'view.assign', 'view.alerts', 'view.reports', 'view.files')
-    follow = {'file.admin': 'view.audit', 'report.viewOthers': 'view.audit'}
+    page_perms = ('view.timeline', 'view.assign', 'view.alerts', 'view.reports',
+                  'view.files', 'view.aiSummary')
+    follow = {'file.admin': 'view.audit', 'report.viewOthers': 'view.audit',
+              'ai.generate': 'view.manage', 'ai.confirm': 'bid.edit',
+              'ai.layout': 'view.audit'}
     with lock:
         changed = False
         for r in db.execute('SELECT key, perms FROM roles').fetchall():
@@ -431,29 +452,36 @@ sync_users()
 
 
 def upsert_file_user(name, password=None, display_name=None, is_admin=None, remove=False):
-    """把页面上的账号变动写回 users.json，重启服务后不丢失。"""
-    try:
-        data = json.loads(USERS_PATH.read_text(encoding='utf-8'))
-    except Exception:
-        data = {}
-    if remove:
-        data.pop(name, None)
-    else:
-        cfg = data.get(name) if isinstance(data.get(name), dict) else {}
-        if password:
-            cfg['password'] = password
-        if display_name is not None:
-            cfg['display_name'] = display_name
-        if is_admin is not None:
-            cfg['is_admin'] = bool(is_admin)
-        data[name] = cfg
-    try:
-        USERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-    except Exception:
-        pass
+    """把页面上的账号变动写回 users.json，重启服务后不丢失。
+
+    文件读-改-写不是 DB 事务，去全局锁后必须用自己的细粒度锁保护，
+    否则并发的用户管理与台账自动建号会互相覆盖整个文件。"""
+    with guard.keyed('users_json'):
+        try:
+            data = json.loads(USERS_PATH.read_text(encoding='utf-8'))
+        except Exception:
+            data = {}
+        if remove:
+            data.pop(name, None)
+        else:
+            cfg = data.get(name) if isinstance(data.get(name), dict) else {}
+            if password:
+                cfg['password'] = password
+            if display_name is not None:
+                cfg['display_name'] = display_name
+            if is_admin is not None:
+                cfg['is_admin'] = bool(is_admin)
+            data[name] = cfg
+        try:
+            USERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+        except Exception:
+            pass
 
 app = FastAPI(title='亚德彩投标台账')
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
+
+# 平台卡死治理 第 1 步：慢请求日志。后 add 的中间件在外层，可覆盖 CORS 处理耗时。
+app.add_middleware(guard.TimingMiddleware)
 
 STRIP_KEYS = {'_updatedBy', '_updatedAt'}
 
@@ -529,7 +557,7 @@ def current_user(authorization: str = Header(default='')):
     token = authorization[7:].strip() if authorization.startswith('Bearer ') else ''
     if not token:
         raise HTTPException(401, '未登录')
-    with lock:
+    with guard.unlocked():
         row = db.execute('SELECT username FROM sessions WHERE token=?', (token,)).fetchone()
     if not row:
         raise HTTPException(401, '登录已过期，请重新登录')
@@ -537,7 +565,7 @@ def current_user(authorization: str = Header(default='')):
 
 
 def require_admin(username: str = Depends(current_user)):
-    with lock:
+    with guard.unlocked():
         row = db.execute('SELECT is_admin FROM users WHERE username=?', (username,)).fetchone()
     if not row or not row['is_admin']:
         raise HTTPException(403, '需要管理员权限')
@@ -593,7 +621,7 @@ def field_level(field_perms, k):
 def perm_of(username):
     """返回当前用户的有效权限：{'roleKey','roleName','perms','fieldPerms','dataScope'}。
     管理员全放行、全字段可写；普通用户取所属角色配置，未配置字段默认可写。"""
-    with lock:
+    with guard.unlocked():
         u = db.execute('SELECT username, is_admin, role_key FROM users WHERE username=?',
                        (username,)).fetchone()
         if not u:
@@ -639,7 +667,7 @@ def old_payload(rid):
     """读取库中现有 payload；不存在返回 None（用于区分新增/更新）。"""
     if not rid:
         return None
-    with lock:
+    with guard.unlocked():
         r = db.execute('SELECT payload FROM rows WHERE rid=?', (rid,)).fetchone()
     if not r:
         return None
@@ -714,7 +742,7 @@ def audit_diff(username, rid, old, new, action='update'):
 
 def self_names(username):
     """行级「仅本人」范围匹配用的名字集合（账号 + 显示名）。"""
-    with lock:
+    with guard.unlocked():
         u = db.execute('SELECT display_name FROM users WHERE username=?', (username,)).fetchone()
     names = {username}
     if u and u['display_name']:
@@ -787,7 +815,7 @@ def login(body: LoginIn):
 
 @app.get('/api/me')
 def me(username: str = Depends(current_user)):
-    with lock:
+    with guard.unlocked():
         u = db.execute('SELECT * FROM users WHERE username=?', (username,)).fetchone()
     if not u:
         raise HTTPException(401, '账号不存在')
@@ -858,7 +886,7 @@ def role_out(r):
 
 @app.get('/api/roles')
 def list_roles(admin: str = Depends(require_admin)):
-    with lock:
+    with guard.unlocked():
         rows = db.execute('SELECT * FROM roles ORDER BY is_system DESC, key').fetchall()
     return {'roles': [role_out(r) for r in rows]}
 
@@ -930,7 +958,7 @@ def admin_count():
 
 @app.get('/api/users')
 def list_users(admin: str = Depends(require_admin)):
-    with lock:
+    with guard.unlocked():
         rows = db.execute('SELECT * FROM users ORDER BY is_admin DESC, username').fetchall()
     return {'users': [user_out(r) for r in rows]}
 
@@ -939,7 +967,7 @@ def list_users(admin: str = Depends(require_admin)):
 def staff_list(q: str = '', username: str = Depends(current_user)):
     """非管理员用户名单（用于负责人筛选与标书负责人/协作人/审核人选择），q 模糊匹配账号或显示名。"""
     kw = '%' + q.strip().lower() + '%'
-    with lock:
+    with guard.unlocked():
         rows = db.execute(
             'SELECT username, display_name FROM users WHERE is_admin=0 '
             'AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?) '
@@ -957,7 +985,7 @@ class ReportIn(BaseModel):
 
 
 def _is_admin(username):
-    with lock:
+    with guard.unlocked():
         r = db.execute('SELECT is_admin FROM users WHERE username=?', (username,)).fetchone()
     return bool(r and r['is_admin'])
 
@@ -972,7 +1000,7 @@ def reports_list(user: str = '', ym: str = '', username: str = Depends(current_u
     if target != username and not _is_admin(username):
         need(username, 'report.viewOthers', '无查看其他人员日报的权限')
     prefix = ym.strip()
-    with lock:
+    with guard.unlocked():
         u = db.execute('SELECT * FROM users WHERE username=?', (target,)).fetchone()
         if not u:
             raise HTTPException(404, '账号不存在')
@@ -1081,7 +1109,7 @@ def bootstrap(username: str = Depends(current_user)):
     p = perm_of(username)
     fp = p['fieldPerms']
     names = self_names(username)
-    with lock:
+    with guard.unlocked():
         rows = []
         for r in db.execute('SELECT * FROM rows').fetchall():
             raw = json.loads(r['payload'])
@@ -1350,7 +1378,7 @@ def bid_files(username: str = Depends(current_user)):
     未建过项目目录的标段不返回（前端按 0 处理）；按当前用户数据范围过滤。"""
     p = perm_of(username)
     names = self_names(username)
-    with lock:
+    with guard.unlocked():
         allowed = set()
         for r in db.execute('SELECT rid, payload FROM rows').fetchall():
             if p['dataScope'] == 'SELF' and not row_in_scope(json.loads(r['payload']), 'SELF', names):
@@ -1379,12 +1407,13 @@ def bid_files(username: str = Depends(current_user)):
 
 
 @app.post('/api/clear')
+@guard.heavy('台账清空', cap=1)
 def clear_all(username: str = Depends(current_user)):
     p = perm_of(username)
     need(username, 'bid.delete', '无台账清空权限')
     names = self_names(username)
     ts = time.time()
-    with lock:
+    with guard.keyed('ledger'), guard.tx(db):
         ids = []
         for r in db.execute('SELECT rid, payload FROM rows').fetchall():
             if p['dataScope'] == 'SELF' and not row_in_scope(json.loads(r['payload']), 'SELF', names):
@@ -1399,6 +1428,7 @@ def clear_all(username: str = Depends(current_user)):
 
 
 @app.post('/api/merge')
+@guard.heavy('台账导入', cap=1)
 def merge(body: MergeIn, username: str = Depends(current_user)):
     """导入合并：与前端 mergeRows 同逻辑（按 rowKey 去重，覆盖时只补非空字段）。
     非「可写」字段的提交值一律丢弃（沿用库中旧值）；批量导入不逐字段写审计，避免日志淹没。"""
@@ -1410,7 +1440,7 @@ def merge(body: MergeIn, username: str = Depends(current_user)):
     add = upd = skip = 0
     changed_ids = []
     created_users = []
-    with lock:
+    with guard.keyed('ledger'), guard.tx(db):
         # 1) 预扫所有人员字段，未命中则自动建号（台账字段值保持原显示名不变）
         for pname in collect_person_names(body.rows):
             _, created = ensure_person(pname)
@@ -1477,7 +1507,7 @@ def changes(since: float = 0.0, username: str = Depends(current_user)):
     p = perm_of(username)
     fp = p['fieldPerms']
     names = self_names(username)
-    with lock:
+    with guard.unlocked():
         changed = []
         for r in db.execute('SELECT * FROM rows WHERE updated_at > ?', (since,)).fetchall():
             raw = json.loads(r['payload'])
@@ -1494,7 +1524,7 @@ def list_audit(limit: int = 100, rid: str = '', username: str = Depends(current_
     if not perm_of(username)['perms'].get('view.audit'):
         raise HTTPException(403, '无审计日志查看权限')
     limit = max(1, min(500, int(limit)))
-    with lock:
+    with guard.unlocked():
         if rid:
             rows = db.execute('SELECT * FROM audit_log WHERE rid=? ORDER BY id DESC LIMIT ?',
                               (rid, limit)).fetchall()
@@ -1519,11 +1549,37 @@ fs_core.init_tables(db)                     # 幂等建表（老库可直接升�
 app.include_router(fs_api_mod.build_router(current_user))
 
 
+# ---------------- 开标汇总 AI（/api/ai-summary/*） ----------------
+# 同样必须在 SPA 兜底路由 /{full_path:path} 之前注册。
+# 本模块只建 PENDING 任务 / 读结果，重活在独立 Python 3.10+ Worker 进程，
+# 不占本进程（单 worker）的请求线程，满足「异步不阻塞主进程」。
+from . import ai_summary_api as ai_api_mod                  # noqa: E402
+
+ai_api_mod.init_tables(db)                  # 幂等建表 + 老库补列 + 默认字段字典
+app.include_router(ai_api_mod.build_router(current_user, {
+    'db': db, 'lock': lock, 'need': need, 'perm_of': perm_of,
+    'row_in_scope': row_in_scope, 'self_names': self_names,
+    'audit_write': audit_write, 'field_level': field_level,
+    'mask_value': mask_value, 'fs': fs_core,
+    'person_fields': PERSON_FIELDS,
+}))
+
+
 # 前端静态托管（frontend/dist，Vite 构建产物）+ SPA history 路由回退：
 # 生产环境由 Nginx 托管，此兜底仅为直连 8000 端口联调时刷新 /manage、/users 不 404。
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 DIST = ROOT / 'frontend' / 'dist'
+
+
+@app.get('/healthz', include_in_schema=False)
+def healthz():
+    """进程存活 / PG 连通 / 任务积压。免登录，供 Nginx 与巡检探测。
+
+    必须注册在 SPA 兜底 /{full_path:path} 之前；DB 不可用时返回 503 而不是 500，
+    便于负载均衡与监控识别。"""
+    data = guard.health_payload(db)
+    return JSONResponse(data, status_code=200 if data['ok'] else 503)
 
 
 @app.get('/{full_path:path}', include_in_schema=False)
