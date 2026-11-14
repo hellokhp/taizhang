@@ -349,6 +349,21 @@ def main():
              config.PG_CONF['dbname'], config.REDIS_URL.split('@')[-1])
     config.AI_TMP.mkdir(parents=True, exist_ok=True)
 
+    # ---- 模型连接自检：只报「是否配置」，绝不打印密钥 ----
+    # 历史坑：密钥填进了 .env.example，进程读的是 .env，任务跑完才发现全程未调模型。
+    try:
+        from bidsummary.config import CONFIG as _llm
+        log.info('[ai] 模型配置：provider=%s text_model=%s key=%s base_url=%s vision=%s',
+                 _llm.text_provider, _llm.text_model,
+                 '已配置' if _llm.text_api_key else '未配置',
+                 _llm.text_base_url or '未配置',
+                 _llm.vision_model or '未配置')
+        if not _llm.text_api_key:
+            log.warning('[ai] 文本模型密钥缺失：请检查 server/ai_worker/.env（不是 .env.example）'
+                        '或 supervisor environment，改完需重启 Worker')
+    except Exception as e:
+        log.warning('[ai] 模型配置自检失败：%s', _safe_error(e))
+
     # ---- 0) 数据库自检：冷启动自动建表，不必先重启后端 ----
     # 与 3.8 后端共用 server/ai_schema.sql（唯一事实源）；整段 DDL 幂等。
     # 失败必须 fail-fast 退出，否则主循环会每 3 秒刷一条「表不存在」。

@@ -157,9 +157,18 @@ def text_client() -> OpenAI:
     global _text_client
     if _text_client is None:
         if not CONFIG.text_base_url or not CONFIG.text_api_key:
+            missing = []
+            if not CONFIG.text_base_url:
+                missing.append("接口地址（LLM_BASE_URL，或所选供应商预设的 base_url）")
+            if not CONFIG.text_api_key:
+                missing.append("密钥（LLM_API_KEY，或 LLM_PROVIDER 对应的 "
+                               "DASHSCOPE_API_KEY / DEEPSEEK_API_KEY / WORKBUDDY_API_KEY）")
             raise RuntimeError(
-                "未配置文本模型连接。请在 .env / supervisor environment 设置 LLM_PROVIDER 对应的\n"
-                "密钥（DASHSCOPE_API_KEY / DEEPSEEK_API_KEY / WORKBUDDY_API_KEY 等）与 LLM_BASE_URL。"
+                "未配置文本模型连接：缺少 %s。\n"
+                "当前 LLM_PROVIDER=%s，LLM_TEXT_MODEL=%s。\n"
+                "请在 server/ai_worker/.env（不是 .env.example）或 supervisor environment 补齐；\n"
+                "CONFIG 在进程启动时固化，修改配置后必须重启 Worker。"
+                % ("；".join(missing), CONFIG.text_provider, CONFIG.text_model)
             )
         _text_client = OpenAI(
             api_key=CONFIG.text_api_key,
