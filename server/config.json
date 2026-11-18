@@ -1,0 +1,10 @@
+{
+  "_comment": "PostgreSQL 唯一配置源：改这里即对所有进程生效，改完重启后端 / AI Worker / 标讯采集 Worker。",
+  "postgres": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "postgres",
+    "password": "admin123.",
+    "dbname": "yadecai"
+  }
+}

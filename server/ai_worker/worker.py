@@ -39,6 +39,7 @@ if __package__ in (None, ''):
 
 from . import (config, db, ai_signal, materialize, db_writer, schema,        # noqa: E402
                ai_prompt_store, format_sig, feedback)
+from .. import shared_config                                                # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,7 +112,7 @@ def _safe_error(msg):
                    os.environ.get('LLM_API_KEY', ''),
                    os.environ.get('LLM_VISION_API_KEY', ''),
                    os.environ.get('REDIS_PASSWORD', ''),
-                   os.environ.get('PG_PASSWORD', '')):
+                   shared_config.pg_password()):
         if secret and len(secret) > 4:
             s = s.replace(secret, '***')
     return '\n'.join(s.splitlines()[:8])
@@ -373,7 +374,7 @@ def main():
                  info['tables'], info['templates'], Path(info['file']).name)
     except Exception as e:
         log.error('[ai] 数据库自检失败，Worker 退出：%s', _safe_error(e))
-        log.error('[ai] 请检查 PG_HOST/PG_PORT/PG_USER/PG_PASSWORD/PG_DB 配置，'
+        log.error('[ai] 请检查 server/config.json 的 postgres 段配置，'
                   '以及 server/ai_schema.sql 是否随代码部署')
         return 1
 

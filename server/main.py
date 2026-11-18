@@ -6,8 +6,8 @@
 （或直接双击 start_api.bat）
 
 账号管理：编辑本目录 users.json 后重启服务即可，启动时自动同步进数据库。
-数据库：PostgreSQL，默认 127.0.0.1:5432 / 库 yadecai；
-        可用环境变量 PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DB 覆盖。
+数据库：PostgreSQL，连接参数统一在 server/config.json 的 postgres 段；
+        可用 TAIZHANG_CONFIG 指定配置文件，或临时用 PG_* 环境变量覆盖。
 首次启动自动建表；若 PG 为空且存在历史 SQLite 文件 server/data.db，会自动迁移其中全部数据。
 """
 import hashlib
@@ -26,19 +26,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import guard
+from .shared_config import pg_conf
 
 BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent
 DB_PATH = BASE / 'data.db'          # 历史 SQLite 数据文件（仅用于一次性迁移，迁移后作为回滚备份保留）
 USERS_PATH = BASE / 'users.json'
 
-PG_CONF = {
-    'host': os.environ.get('PG_HOST', '127.0.0.1'),
-    'port': int(os.environ.get('PG_PORT', '5432')),
-    'user': os.environ.get('PG_USER', 'postgres'),
-    'password': os.environ.get('PG_PASSWORD', 'yinhe123.'),
-    'dbname': os.environ.get('PG_DB', 'yadecai'),
-}
+PG_CONF = pg_conf()
 
 # 平台卡死治理：全局锁带等待上限（默认 3s），超时返回 503 而不是无限排队。
 # 可重入性必须保留；纯读路径用 guard.unlocked()，慢写用 guard.keyed() + tx()。
@@ -329,6 +324,12 @@ PERM_CATALOG = [
     ('view.audit', '审计日志', '页面'),
     ('view.files', '文件存储', '页面'),
     ('view.aiSummary', '开标汇总', '页面'),
+    ('view.bidcrawl', '标讯采集', '页面'),
+    ('bidcrawl.manage', '标讯采集 · 配置/提交任务', '操作'),
+    ('view.schedule', '标讯采集 · 定时任务（查看，需同时开「标讯采集」）', '页面'),
+    ('schedule.create', '标讯采集 · 定时任务（新建）', '操作'),
+    ('schedule.update', '标讯采集 · 定时任务（修改/立即执行）', '操作'),
+    ('schedule.delete', '标讯采集 · 定时任务（删除）', '操作'),
     ('ai.generate', '开标汇总 · 生成/复核/重试', '操作'),
     ('ai.confirm', '开标汇总 · 定稿', '操作'),
     ('ai.layout', '开标汇总 · 布局管理', '操作'),
@@ -395,10 +396,10 @@ def backfill_role_perms():
     view.files 跟随 view.manage（能进台账就能进文件存储）；file.admin 跟随 view.audit；
     report.viewOthers 跟随 view.audit（管理属性权限，默认仅管理层可看他人日报）。"""
     page_perms = ('view.timeline', 'view.assign', 'view.alerts', 'view.reports',
-                  'view.files', 'view.aiSummary')
+                  'view.files', 'view.aiSummary', 'view.bidcrawl')
     follow = {'file.admin': 'view.audit', 'report.viewOthers': 'view.audit',
               'ai.generate': 'view.manage', 'ai.confirm': 'bid.edit',
-              'ai.layout': 'view.audit'}
+              'ai.layout': 'view.audit', 'bidcrawl.manage': 'bid.edit'}
     with lock:
         changed = False
         for r in db.execute('SELECT key, perms FROM roles').fetchall():
@@ -1328,6 +1329,82 @@ def upsert_row(rid: str, body: dict, username: str = Depends(current_user)):
     return pack(row, p['fieldPerms'])
 
 
+def enroll_project(username: str, project: dict, overwrite: bool = False) -> dict:
+    """报名：把采集到的项目写进台账（rows）。
+
+    - 去重口径与前端 rowKey 一致：招标编号+标段；无编号用 项目名+开标时间；
+    - 已在台账里 → 默认不重复添加，只把已有行原样返回（existing=True）；
+    - overwrite=True 时用最新解析结果补齐，但**不覆盖已有非空值**（人工填的优先）；
+    - 字段权限走 guard_in，保留「无权限字段不落库」的既有约束。
+    """
+    from .bidcrawl.enroll import new_rid
+    need(username, 'bid.edit', '无台账新增权限')
+    p = perm_of(username)
+    ts = time.time()
+    project = dict(project or {})
+    # 报名人默认成为标书负责人：否则「仅本人相关」数据范围的用户看不到自己报的名
+    if not str(project.get('lead') or '').strip():
+        project['lead'] = username
+    no = str(project.get('bidNo') or '').strip().lower()
+    pkg = str(project.get('pkg') or '').strip()
+    name = str(project.get('projectName') or '').strip()
+    otime = str(project.get('openTime') or '').strip()
+    with lock:
+        if no:
+            hit = db.execute(
+                "SELECT rid FROM rows WHERE lower(coalesce(payload::jsonb->>'bidNo',''))=?"
+                " AND coalesce(payload::jsonb->>'pkg','')=? LIMIT 1", (no, pkg)).fetchone()
+        else:
+            hit = db.execute(
+                "SELECT rid FROM rows WHERE coalesce(payload::jsonb->>'projectName','')=?"
+                " AND coalesce(payload::jsonb->>'openTime','')=? LIMIT 1",
+                (name, otime)).fetchone()
+        old = {}
+        if hit:
+            rid = hit['rid']
+            if not overwrite:
+                row = db.execute('SELECT * FROM rows WHERE rid=?', (rid,)).fetchone()
+                return {'ok': True, 'rid': rid, 'existing': True,
+                        'project': pack(row, p['fieldPerms']),
+                        'message': '该项目已在投标管理中，未重复添加'}
+            old = old_payload(rid) or {}
+            merged = dict(project)
+            for k, v in old.items():
+                if k in merged and not str(merged.get(k) or '').strip() \
+                        and str(v or '').strip():
+                    merged[k] = v          # 人工填过的值不因解析为空而被清掉
+            payload, rejects = guard_in(rid, merged, p['fieldPerms'])
+            action = 'update'
+        else:
+            rid = new_rid()
+            payload, rejects = guard_in(rid, project, p['fieldPerms'])
+            action = 'create'
+        if rejects:
+            audit_write([(username, rid, 'reject', k, ov, nv, False)
+                         for k, ov, nv, lv in rejects])
+            db.commit()
+            labels = '、'.join(FIELD_LABELS.get(k, k) for k, _, _, _ in rejects)
+            raise HTTPException(403, '无权限写入字段：' + labels)
+        db.execute(
+            'INSERT INTO rows(rid, payload, updated_by, updated_at) VALUES(?,?,?,?) '
+            'ON CONFLICT(rid) DO UPDATE SET payload=excluded.payload, '
+            'updated_by=excluded.updated_by, updated_at=excluded.updated_at',
+            (rid, json.dumps(payload, ensure_ascii=False), username, ts))
+        db.execute('DELETE FROM deleted WHERE rid=?', (rid,))
+        try:
+            ensure_bid_dir(rid, payload, username)
+        except Exception:
+            pass
+        audit_write([(username, rid, action, 'projectName',
+                      str((old or {}).get('projectName') or ''),
+                      str(payload.get('projectName') or ''), True)])
+        db.commit()
+        row = db.execute('SELECT * FROM rows WHERE rid=?', (rid,)).fetchone()
+    return {'ok': True, 'rid': rid, 'existing': bool(hit) and not overwrite,
+            'project': pack(row, p['fieldPerms']),
+            'message': '已加入投标管理' if not hit else '已用最新解析结果更新'}
+
+
 @app.delete('/api/rows/{rid}')
 def delete_row(rid: str, username: str = Depends(current_user)):
     p = perm_of(username)
@@ -1563,6 +1640,19 @@ app.include_router(ai_api_mod.build_router(current_user, {
     'mask_value': mask_value, 'fs': fs_core,
     'person_fields': PERSON_FIELDS,
 }))
+
+
+# ---------------- 标讯采集（/api/bidcrawl/*） ----------------
+# 只做配置 CRUD、配方管理与任务提交；采集执行在独立 worker 进程。
+from . import bidcrawl_api as bidcrawl_api_mod                # noqa: E402
+
+bidcrawl_api_mod.init_tables(db)
+app.include_router(bidcrawl_api_mod.build_router(current_user, {
+    'need': need, 'enroll_project': enroll_project}))
+# 定时任务走独立的权限点，不与采集页的 view.bidcrawl 绑定：
+# 只有被授予 view.schedule / schedule.* 的角色才能查看与增删改。
+app.include_router(bidcrawl_api_mod.build_schedule_router(current_user, {
+    'need': need}))
 
 
 # 前端静态托管（frontend/dist，Vite 构建产物）+ SPA history 路由回退：

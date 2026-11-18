@@ -1,0 +1,275 @@
+{
+  "meta": {
+    "id": "ctpch",
+    "host": "ctpch.fmscop.bankofchina.com",
+    "name": "中银智采",
+    "notes": "由用户提供的接口证据生成：列表 POST https://ctpch.fmscop.bankofchina.com/pcm/c-pcm-web/C08411SUP000/v1/SupplierEnroll/client/getNoticeByType（items_path $.respBody.data[*]，关键词参数 reqBody.ancmHdlnCntnt，翻页参数 reqBody.pageNo，详情页链接来源 用户提供的详情页示例）→ 详情 https://ctpch.fmscop.bankofchina.com/pcm/c-pcm-web/C08411SUP000/v1/SupplierEnroll/client/getNoticeDetail（$.respBody.ancmCntnt）。请求头、请求体均取自用户粘贴的真实 curl，未做猜测；新配方默认 status=paused 且关闭全局采购人白名单，请审核后再启用。",
+    "status": "paused",
+    "version": 1,
+    "base_url": "https://ctpch.fmscop.bankofchina.com",
+    "entry_url": "https://ctpch.fmscop.bankofchina.com/pcm/c-pcm-web/C08411SUP000/v1/SupplierEnroll/client/getNoticeByType",
+    "created_by": "ai"
+  },
+  "detail": {
+    "ai": {
+      "cache": true,
+      "fields": [
+        "budget",
+        "fee_note",
+        "scope",
+        "doc_get_start",
+        "doc_get_end",
+        "open_at",
+        "region",
+        "buyer",
+        "bid_no",
+        "agency",
+        "contact",
+        "qualification",
+        "project_period",
+        "bidder_limit",
+        "project_name",
+        "funding",
+        "bid_place",
+        "notice_type"
+      ],
+      "enabled": true,
+      "max_chars": 20000,
+      "timeout_s": 90,
+      "fallback_regex": {
+        "agency": "([\\u4e00-\\u9fa5]{4,30}(?:有限公司|有限责任公司))（招标代理机构）",
+        "bid_no": "(?:招标编号|项目编号|采购编号)[：:]\\s*([A-Za-z0-9\\-_（）()]{4,40})",
+        "budget": "(?:合同估算价|项目预算|采购预算|预算金额|最高限价|预算)[：:\\s]*([^\\n，。；]{1,40})",
+        "contact": "联系人[：:]\\s*([^\\n，。]{1,40})",
+        "open_at": "(?:投标文件递交截止时间|开标时间|响应文件递交截止时间)[：:]\\s*([^\\n，。（]{4,45})",
+        "fee_note": "(?:标书费|文件费|招标文件费|.*?费用)[：:]\\s*([^\\n]{1,60})",
+        "doc_get_end": "获取时间[：:]\\s*从\\s*[^\\n到]{4,40}?\\s*到\\s*([^\\n]{4,40})",
+        "bidder_limit": "中标人数量[：:]\\s*([^\\n，。名]{1,10})",
+        "doc_get_start": "获取时间[：:]\\s*从\\s*([^\\n到]{4,40}?)\\s*到",
+        "project_period": "(?:工期|服务期)[：:]\\s*([^\\n，。]{1,20})"
+      },
+      "prompt_version": "auto-detail-v1"
+    },
+    "enabled": true,
+    "extract": {
+      "scope": "json",
+      "fields": {
+        "bid_no": {
+          "path": "pkNotice",
+          "strip": true
+        },
+        "notice_type": {
+          "path": "noticeType",
+          "strip": true
+        }
+      }
+    },
+    "request": {
+      "url": "https://ctpch.fmscop.bankofchina.com/pcm/c-pcm-web/C08411SUP000/v1/SupplierEnroll/client/getNoticeDetail",
+      "body": {
+        "reqBody": {
+          "page": "1",
+          "pkNotice": "{pkNotice}",
+          "noticeType": "{noticeType}",
+          "purchaseType": "{purchaseType}"
+        },
+        "reqHeader": {
+          "apiVer": "v1",
+          "msgLvl": "1",
+          "apiCode": "/SupplierEnroll/client/getNoticeDetail ",
+          "branchNo": "",
+          "callCode": "A084110647U5A",
+          "txnSerNo": "10000000000000000000",
+          "formatVer": "01",
+          "msgStatus": "1",
+          "zipMethod": "01",
+          "entityCode": "003",
+          "channelCode": "000100",
+          "encryptFlag": "1",
+          "globalSerNo": "C084110647U5A202611171946324581453",
+          "requestTime": "20261117 19:46:32.950",
+          "shardingKey": "",
+          "reserveField": "",
+          "shardingType": "09",
+          "encryptKeyVer": "0",
+          "initialVector": "",
+          "targetSerCode": "C08411GWG100"
+        }
+      },
+      "method": "POST",
+      "headers": {
+        "token": "undefined",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://ctpch.fmscop.bankofchina.com",
+        "Referer": "https://ctpch.fmscop.bankofchina.com/",
+        "sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Microsoft Edge\";v=\"157\", \"Chromium\";v=\"157\"",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0",
+        "Content-Type": "application/json",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\""
+      }
+    },
+    "id_field": "external_id",
+    "row_path": "$.respBody",
+    "attachments": {
+      "enabled": false
+    },
+    "content_path": "ancmCntnt",
+    "content_encoding": "html"
+  },
+  "discovery": {
+    "mode": "json_api",
+    "fields": {
+      "url": {
+        "template": "https://ctpch.fmscop.bankofchina.com/#/first-page/detail?noticeType=1&pkNotice={pkNotice}&purchaseType=0"
+      },
+      "title": {
+        "path": "ancmHdlnCntnt",
+        "strip": true
+      },
+      "publish_at": {
+        "path": "ancmAncDt",
+        "type": "datetime",
+        "strip": true
+      },
+      "external_id": {
+        "path": "pkNotice"
+      }
+    },
+    "request": {
+      "url": "https://ctpch.fmscop.bankofchina.com/pcm/c-pcm-web/C08411SUP000/v1/SupplierEnroll/client/getNoticeByType",
+      "body": {
+        "reqBody": {
+          "ts": "",
+          "pageNo": 1,
+          "orgType": "1",
+          "areaCode": "",
+          "pageSize": 10,
+          "ancmAncDt": "",
+          "createTime": "",
+          "noticeType": "",
+          "ancmHdlnCntnt": "{keyword}"
+        },
+        "reqHeader": {
+          "apiVer": "v1",
+          "msgLvl": "1",
+          "apiCode": "/SupplierEnroll/client/getNoticeByType",
+          "branchNo": "",
+          "callCode": "A084110647U5A",
+          "txnSerNo": "10000000000000000000",
+          "formatVer": "01",
+          "msgStatus": "1",
+          "zipMethod": "01",
+          "entityCode": "003",
+          "channelCode": "000100",
+          "encryptFlag": "1",
+          "globalSerNo": "C084110647U5A202611171946160953673",
+          "requestTime": "20261117 19:46:16.344",
+          "shardingKey": "",
+          "reserveField": "",
+          "shardingType": "09",
+          "encryptKeyVer": "0",
+          "initialVector": "",
+          "targetSerCode": "C08411GWG100"
+        }
+      },
+      "method": "POST",
+      "params": null
+    },
+    "items_path": "$.respBody.data[*]",
+    "pagination": {
+      "size": 10,
+      "type": "page",
+      "start": 1,
+      "max_pages": 21,
+      "stop_when": [
+        "empty_items",
+        "page_unchanged",
+        "reached_total"
+      ],
+      "page_param": "reqBody.pageNo",
+      "size_param": "reqBody.pageSize",
+      "total_path": "$.respBody.totalRecord"
+    },
+    "total_path": "$.respBody.totalRecord"
+  },
+  "normalize": {
+    "amount": {
+      "units": {
+        "元": 1,
+        "万元": 10000
+      },
+      "target": "budget"
+    },
+    "filters": {
+      "inherit": "global",
+      "override": {},
+      "buyer_whitelist": false
+    },
+    "keep_url": true
+  },
+  "transport": {
+    "url": "https://ctpch.fmscop.bankofchina.com/pcm/c-pcm-web/C08411SUP000/v1/SupplierEnroll/client/getNoticeByType",
+    "kind": "http",
+    "retry": {
+      "times": 2,
+      "retry_on": [
+        429,
+        500,
+        502,
+        503,
+        504
+      ],
+      "backoff_s": 5
+    },
+    "method": "POST",
+    "headers": {
+      "token": "undefined",
+      "Accept": "application/json, text/plain, */*",
+      "Origin": "https://ctpch.fmscop.bankofchina.com",
+      "Referer": "https://ctpch.fmscop.bankofchina.com/",
+      "sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Microsoft Edge\";v=\"157\", \"Chromium\";v=\"157\"",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0",
+      "Content-Type": "application/json",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"Windows\""
+    },
+    "encoding": "utf-8",
+    "timeout_s": 25,
+    "trust_env": false,
+    "rate_limit": {
+      "qps": 0.2,
+      "concurrency": 1
+    },
+    "max_response_mb": 20,
+    "total_timeout_s": 30
+  },
+  "validation": {
+    "sample_keyword": "硬件",
+    "required_fields": {
+      "url": 1,
+      "title": 1
+    },
+    "expected_nonempty": {
+      "publish_at": 0.8
+    },
+    "page2_must_differ": false,
+    "url_reachable_rate": 0.9,
+    "min_items_per_keyword": 1,
+    "detail_expected_nonempty": {
+      "scope": 0.5,
+      "budget": 0.5,
+      "open_at": 0.5,
+      "fee_note": 0.5,
+      "doc_get_end": 0.5
+    }
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "meta": {
+    "id": "cgjy",
+    "host": "cgjy.tobacco.com.cn",
+    "name": "中烟电子采购平台",
+    "notes": "由用户提供的 HTML 证据生成：列表 GET https://cgjy.tobacco.com.cn/search.jspx（row_selector ul.searchList > li，9 行/样本，关键词参数 q，分页 单页，详情页链接 用户模板 https://cgjy.tobacco.com.cn{_href}）→ 详情 #content。选择器均由样本回测命中后才写入；新配方默认 status=paused，请审核后再启用。",
+    "status": "paused",
+    "version": 2,
+    "base_url": "https://cgjy.tobacco.com.cn",
+    "entry_url": "https://cgjy.tobacco.com.cn/search.jspx",
+    "created_by": "ai"
+  },
+  "detail": {
+    "ai": {
+      "cache": true,
+      "fields": [
+        "budget",
+        "fee_note",
+        "scope",
+        "doc_get_start",
+        "doc_get_end",
+        "open_at",
+        "region",
+        "buyer",
+        "bid_no",
+        "agency",
+        "contact",
+        "qualification",
+        "project_period",
+        "bidder_limit",
+        "project_name",
+        "funding",
+        "bid_place",
+        "notice_type"
+      ],
+      "enabled": true,
+      "max_chars": 20000,
+      "timeout_s": 90,
+      "fallback_regex": {
+        "agency": "([\\u4e00-\\u9fa5]{4,30}(?:有限公司|有限责任公司))（招标代理机构）",
+        "bid_no": "(?:招标编号|项目编号|采购编号)[：:]\\s*([A-Za-z0-9\\-_（）()]{4,40})",
+        "budget": "(?:合同估算价|项目预算|采购预算|预算金额|最高限价|预算)[：:\\s]*([^\\n，。；]{1,40})",
+        "contact": "联系人[：:]\\s*([^\\n，。]{1,40})",
+        "open_at": "(?:投标文件递交截止时间|开标时间|响应文件递交截止时间)[：:]\\s*([^\\n，。（]{4,45})",
+        "fee_note": "(?:标书费|文件费|招标文件费|.*?费用)[：:]\\s*([^\\n]{1,60})",
+        "doc_get_end": "获取时间[：:]\\s*从\\s*[^\\n到]{4,40}?\\s*到\\s*([^\\n]{4,40})",
+        "bidder_limit": "中标人数量[：:]\\s*([^\\n，。名]{1,10})",
+        "doc_get_start": "获取时间[：:]\\s*从\\s*([^\\n到]{4,40}?)\\s*到",
+        "project_period": "(?:工期|服务期)[：:]\\s*([^\\n，。]{1,20})"
+      },
+      "prompt_version": "auto-detail-v1"
+    },
+    "enabled": true,
+    "extract": {
+      "scope": "html",
+      "fields": {
+        "title": {
+          "css": "h2::text",
+          "strip": true
+        }
+      }
+    },
+    "request": {
+      "url": "{url}",
+      "method": "GET",
+      "headers": {
+        "Referer": "https://cgjy.tobacco.com.cn/search.jspx"
+      }
+    },
+    "id_field": "url",
+    "attachments": {
+      "enabled": false
+    },
+    "content_css": "#content",
+    "content_encoding": "html"
+  },
+  "discovery": {
+    "mode": "html_list",
+    "fields": {
+      "url": {
+        "template": "https://cgjy.tobacco.com.cn{_href}"
+      },
+      "title": {
+        "css": "span::text",
+        "strip": true
+      },
+      "publish_at": {
+        "type": "datetime",
+        "regex": "(20\\d{2})\\s*[-/.年]\\s*(\\d{1,2})\\s*[-/.月]\\s*(\\d{1,2})",
+        "template": "{1}-{2}-{3} 00:00"
+      }
+    },
+    "request": {
+      "url": "https://cgjy.tobacco.com.cn/search_{page}.jspx",
+      "body": null,
+      "method": "GET",
+      "params": {
+        "q": "{keyword}",
+        "input": "搜 索"
+      }
+    },
+    "pagination": {
+      "type": "page",
+      "start": 1,
+      "first_url": "https://cgjy.tobacco.com.cn/search.jspx",
+      "max_pages": 20,
+      "stop_when": [
+        "empty_items",
+        "page_unchanged",
+        "reached_total"
+      ],
+      "page_param": "",
+      "page_in_url": true,
+      "url_template": "https://cgjy.tobacco.com.cn/search_{page}.jspx"
+    },
+    "row_selector": "ul.searchList > li"
+  },
+  "normalize": {
+    "amount": {
+      "units": {
+        "元": 1,
+        "万元": 10000
+      },
+      "target": "budget"
+    },
+    "filters": {
+      "inherit": "global",
+      "override": {},
+      "buyer_whitelist": false
+    },
+    "keep_url": true
+  },
+  "transport": {
+    "url": "https://cgjy.tobacco.com.cn/search.jspx",
+    "kind": "http",
+    "retry": {
+      "times": 2,
+      "retry_on": [
+        429,
+        500,
+        502,
+        503,
+        504
+      ],
+      "backoff_s": 5
+    },
+    "method": "GET",
+    "headers": {
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "Cookie": "clientlanguage=zh_CN; portalroute=8afb8c02be6cbc160324510749fa782b|1dc4b9a14d6e9313ed076adc8b0886ea",
+      "Origin": "https://cgjy.tobacco.com.cn",
+      "Referer": "https://cgjy.tobacco.com.cn/",
+      "sec-ch-ua": "\"Not-A.Brand\";v=\"99\", \"Microsoft Edge\";v=\"157\", \"Chromium\";v=\"157\"",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"Windows\"",
+      "Upgrade-Insecure-Requests": "1"
+    },
+    "encoding": "utf-8",
+    "timeout_s": 25,
+    "trust_env": false,
+    "rate_limit": {
+      "qps": 0.2,
+      "concurrency": 1
+    },
+    "max_response_mb": 20,
+    "total_timeout_s": 30
+  },
+  "validation": {
+    "sample_keyword": "宣传",
+    "required_fields": {
+      "url": 1,
+      "title": 1
+    },
+    "expected_nonempty": {
+      "publish_at": 0.8
+    },
+    "page2_must_differ": true,
+    "url_reachable_rate": 0.9,
+    "min_items_per_keyword": 1,
+    "detail_expected_nonempty": {
+      "buyer": 0.5,
+      "scope": 0.5,
+      "open_at": 0.5,
+      "doc_get_end": 0.5
+    }
+  }
+}

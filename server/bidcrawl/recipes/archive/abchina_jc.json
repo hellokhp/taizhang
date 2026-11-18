@@ -1,0 +1,124 @@
+{
+  "meta": {
+    "id": "abchina_jc",
+    "name": "农银e采平台",
+    "host": "jc.abchina.com.cn",
+    "entry_url": "https://jc.abchina.com.cn/gateway/puc/portalMessage/queryInviteMessageForEie",
+    "version": 1,
+    "status": "paused",
+    "created_by": "ai",
+    "notes": "由入口接口直探生成：queryInviteMessageForEie + pageInfo.current/size + messageTitle 关键词；Referer 必须为 /puc/，Accept 不可含 text/javascript q=0.01（WAF）。详情正文暂未接入，仅列表。 详情页为 SPA（/#/noticeDetail?messageId=），正文接口待补，当前仅采列表字段。"
+  },
+  "transport": {
+    "kind": "http",
+    "method": "POST",
+    "url": "https://jc.abchina.com.cn/gateway/puc/portalMessage/queryInviteMessageForEie",
+    "headers": {
+      "Content-Type": "application/json;charset=UTF-8",
+      "Accept": "application/json, text/plain, */*",
+      "X-Requested-With": "XMLHttpRequest",
+      "Referer": "https://jc.abchina.com.cn/puc/",
+      "Origin": "https://jc.abchina.com.cn",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    },
+    "encoding": "utf-8",
+    "trust_env": false,
+    "timeout_s": 25,
+    "total_timeout_s": 30,
+    "max_response_mb": 5,
+    "rate_limit": {
+      "qps": 0.1,
+      "concurrency": 1
+    },
+    "retry": {
+      "times": 2,
+      "backoff_s": 5,
+      "retry_on": [
+        429,
+        500,
+        502,
+        503,
+        504
+      ]
+    }
+  },
+  "discovery": {
+    "mode": "json_api",
+    "request": {
+      "url": "https://jc.abchina.com.cn/gateway/puc/portalMessage/queryInviteMessageForEie",
+      "method": "POST",
+      "params": null,
+      "body": {
+        "pageInfo": {
+          "current": "{page}",
+          "size": "{size}"
+        },
+        "messageTitle": "{keyword}"
+      }
+    },
+    "pagination": {
+      "type": "page",
+      "page_param": "current",
+      "start": 1,
+      "size_param": "size",
+      "size": 50,
+      "size_probe": null,
+      "total_path": "$.value.total",
+      "max_pages": 20,
+      "stop_when": [
+        "empty_items",
+        "page_unchanged",
+        "reached_total"
+      ]
+    },
+    "items_path": "$.value.records[*]",
+    "total_path": "$.value.total",
+    "fields": {
+      "title": {
+        "path": "messageTitle",
+        "strip": true
+      },
+      "url": {
+        "template": "https://jc.abchina.com.cn/puc/#/noticeDetail?messageId={messageId}&currentPage=1"
+      },
+      "external_id": {
+        "path": "messageId",
+        "strip": true
+      },
+      "publish_at": {
+        "path": "startTime",
+        "type": "datetime",
+        "strip": true
+      }
+    }
+  },
+  "detail": {
+    "enabled": false
+  },
+  "normalize": {
+    "filters": {
+      "inherit": "global",
+      "override": {},
+      "buyer_whitelist": false
+    },
+    "amount": {
+      "target": "budget",
+      "units": {
+        "万元": 10000,
+        "元": 1
+      }
+    },
+    "keep_url": false
+  },
+  "validation": {
+    "min_items_per_keyword": 1,
+    "page2_must_differ": false,
+    "required_fields": {
+      "title": 1.0,
+      "url": 1.0
+    },
+    "expected_nonempty": {},
+    "url_reachable_rate": 0.9,
+    "sample_keyword": "门楣"
+  }
+}

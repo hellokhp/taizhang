@@ -466,7 +466,10 @@ td.td-center{text-align:center;}
 .fld{display:flex;flex-direction:column;gap:5px;}
 .fld label{font-size:11.5px;color:var(--mut);font-weight:500;}
 .fld label b{color:var(--win);font-weight:600;}
-.fld input,.fld select{width:100%;padding:7px 10px;font-size:12.5px;}
+/* 只让「输入类」控件撑满：复选框/单选框若也被 width:100%，会撑成整行宽的方框，
+   紧跟其后的文字只剩几十像素，被压成一列竖排（定时任务弹窗踩过） */
+.fld input:not([type="checkbox"]):not([type="radio"]), .fld select{width:100%;padding:7px 10px;font-size:12.5px;}
+.fld input[type="checkbox"], .fld input[type="radio"]{width:auto;padding:0;margin:0;flex:none;}
 .fld.span2{grid-column:span 2;} .fld.span3{grid-column:span 3;}
 .fld textarea{width:100%;resize:vertical;min-height:56px;padding:7px 10px;font-size:12.5px;}
 .fld-tip{font-size:10.5px;line-height:1.6;color:var(--sub);margin-top:-1px;}

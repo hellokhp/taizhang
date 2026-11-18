@@ -51,6 +51,10 @@ const pendingCnt = computed(() => buildAlerts(ST.rows, {
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.4" width="12" height="11.2" rx="1.6"/><path d="M2 6h12M5.6 6v7.6"/><path d="M8 9.2h3.4M8 11.4h2.2"/></svg>
       开标汇总
     </button>
+    <button v-if="can('view.bidcrawl')" :class="{on: route.path === '/bidcrawl'}" @click="router.push('/bidcrawl')">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.8"/><path d="M2.4 8h11.2M8 2.2c1.6 1.7 2.4 3.7 2.4 5.8S9.6 12.1 8 13.8c-1.6-1.7-2.4-3.7-2.4-5.8S6.4 3.9 8 2.2Z"/></svg>
+      标讯采集
+    </button>
     <button v-if="can('view.users')" :class="{on: route.path === '/users'}" @click="router.push('/users')">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 13.8c.7-2.7 2.9-4.2 5.4-4.2s4.7 1.5 5.4 4.2"/></svg>
       用户管理

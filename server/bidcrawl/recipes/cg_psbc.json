@@ -1,0 +1,194 @@
+{
+  "meta": {
+    "id": "cg_psbc",
+    "host": "cg.psbc.com",
+    "name": "邮银易采平台",
+    "notes": "由站点探测器自动生成：入口页 JS → 列表接口 /api/search/searchKeyWord（$.res.rows[*]，关键词参数 keyWords）→ 详情正文 -.- → 详情页 URL 模板 已还原。新配方默认关闭全局采购人白名单，避免未知站点被业务规则误杀，请审核后再启用。",
+    "status": "paused",
+    "version": 3,
+    "entry_url": "https://cg.psbc.com/",
+    "created_by": "ai"
+  },
+  "detail": {
+    "ai": {
+      "cache": true,
+      "fields": [
+        "budget",
+        "fee_note",
+        "scope",
+        "doc_get_start",
+        "doc_get_end",
+        "open_at",
+        "region",
+        "buyer",
+        "bid_no",
+        "agency",
+        "contact",
+        "qualification",
+        "project_period",
+        "bidder_limit",
+        "project_name",
+        "funding",
+        "bid_place",
+        "notice_type"
+      ],
+      "enabled": true,
+      "max_chars": 20000,
+      "timeout_s": 90,
+      "fallback_regex": {
+        "agency": "([\\u4e00-\\u9fa5]{4,30}(?:有限公司|有限责任公司))（招标代理机构）",
+        "bid_no": "(?:招标编号|项目编号|采购编号)[：:]\\s*([A-Za-z0-9\\-_（）()]{4,40})",
+        "budget": "(?:合同估算价|项目预算|采购预算|预算金额|最高限价|预算)[：:\\s]*([^\\n，。；]{1,40})",
+        "contact": "联系人[：:]\\s*([^\\n，。]{1,40})",
+        "open_at": "(?:投标文件递交截止时间|开标时间|响应文件递交截止时间)[：:]\\s*([^\\n，。（]{4,45})",
+        "fee_note": "(?:标书费|文件费|招标文件费|.*?费用)[：:]\\s*([^\\n]{1,60})",
+        "doc_get_end": "获取时间[：:]\\s*从\\s*[^\\n到]{4,40}?\\s*到\\s*([^\\n]{4,40})",
+        "bidder_limit": "中标人数量[：:]\\s*([^\\n，。名]{1,10})",
+        "doc_get_start": "获取时间[：:]\\s*从\\s*([^\\n到]{4,40}?)\\s*到",
+        "project_period": "(?:工期|服务期)[：:]\\s*([^\\n，。]{1,20})"
+      },
+      "prompt_version": "auto-detail-v1"
+    },
+    "enabled": true,
+    "extract": {
+      "scope": "html",
+      "fields": {}
+    },
+    "request": {
+      "url": "{url}",
+      "method": "GET"
+    },
+    "attachments": {
+      "enabled": false
+    },
+    "content_css": ".content",
+    "content_encoding": "html"
+  },
+  "discovery": {
+    "mode": "json_api",
+    "fields": {
+      "url": {
+        "fallback": [
+          {
+            "path": "url"
+          },
+          {
+            "path": "link"
+          },
+          {
+            "path": "detailUrl"
+          }
+        ],
+        "template": "https://cg.psbc.com/cms/default/webfile{url}"
+      },
+      "title": {
+        "path": "title",
+        "strip": true
+      },
+      "publish_at": {
+        "path": "publishDate",
+        "type": "datetime",
+        "strip": true
+      },
+      "external_id": {
+        "path": "id"
+      }
+    },
+    "request": {
+      "url": "https://cg.psbc.com/cms/api/search/searchKeyWord",
+      "body": {
+        "dto": {
+          "siteId": "725",
+          "keyWords": "{keyword}"
+        },
+        "pageNo": "{page}",
+        "pageSize": "{size}"
+      },
+      "method": "POST",
+      "params": null
+    },
+    "items_path": "$.res.rows[*]",
+    "pagination": {
+      "size": 50,
+      "type": "page",
+      "start": 1,
+      "max_pages": 20,
+      "stop_when": [
+        "empty_items",
+        "page_unchanged",
+        "reached_total"
+      ],
+      "page_param": "pageNo",
+      "size_param": "pageSize",
+      "size_probe": null,
+      "total_path": "$.res.total"
+    }
+  },
+  "normalize": {
+    "amount": {
+      "units": {
+        "元": 1,
+        "万元": 10000
+      },
+      "target": "budget"
+    },
+    "filters": {
+      "inherit": "global",
+      "override": {},
+      "buyer_whitelist": false
+    },
+    "keep_url": true
+  },
+  "transport": {
+    "url": "https://cg.psbc.com/cms/api/search/searchKeyWord",
+    "kind": "http",
+    "retry": {
+      "times": 2,
+      "retry_on": [
+        429,
+        500,
+        502,
+        503,
+        504
+      ],
+      "backoff_s": 5
+    },
+    "method": "POST",
+    "headers": {
+      "Accept": "*/*",
+      "Origin": "https://cg.psbc.com",
+      "Referer": "https://cg.psbc.com/",
+      "Content-Type": "application/json;charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest"
+    },
+    "encoding": "utf-8",
+    "timeout_s": 25,
+    "trust_env": false,
+    "rate_limit": {
+      "qps": 0.1,
+      "concurrency": 1
+    },
+    "max_response_mb": 5,
+    "total_timeout_s": 30
+  },
+  "validation": {
+    "sample_keyword": "门头",
+    "required_fields": {
+      "url": 1,
+      "title": 1
+    },
+    "expected_nonempty": {
+      "publish_at": 0.8
+    },
+    "page2_must_differ": false,
+    "url_reachable_rate": 0.9,
+    "min_items_per_keyword": 1,
+    "detail_expected_nonempty": {
+      "scope": 0.5,
+      "budget": 0.5,
+      "open_at": 0.5,
+      "fee_note": 0.5,
+      "doc_get_end": 0.5
+    }
+  }
+}

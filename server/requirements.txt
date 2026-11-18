@@ -2,3 +2,18 @@ fastapi
 uvicorn[standard]
 psycopg2-binary
 redis>=4.2
+
+# 标讯采集（server/bidcrawl）
+httpx>=0.27
+lxml>=5.0
+parsel>=1.9
+jsonpath-ng>=1.6
+
+# 详情正文 AI 结构化抽取（复用 server/ai_worker/.env 里的模型配置）
+openai>=1.40
+python-dotenv>=1.0
+
+# 正文为 PDF 的站点（如 cg.11185.cn）需要把文件转成文本再抽取。
+# pypdf 是首选后端；若运行环境只装了 PyMuPDF / pdfplumber / pdfminer / PyPDF2，
+# pdf_text.extract_text_ex 会自动降级到其中一个，任一可用即可。
+pypdf>=4.0

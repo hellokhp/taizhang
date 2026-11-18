@@ -11,6 +11,7 @@ import HandleView from '../views/HandleView.vue'
 import ReportsView from '../views/ReportsView.vue'
 import FilesView from '../views/FilesView.vue'
 import AiSummaryView from '../views/AiSummaryView.vue'
+import BidCrawlView from '../views/BidCrawlView.vue'
 import UserManageView from '../views/UserManageView.vue'
 import RoleManageView from '../views/RoleManageView.vue'
 import AuditView from '../views/AuditView.vue'
@@ -28,6 +29,7 @@ const routes = [
   { path: '/reports', name: 'reports', component: ReportsView, meta: { perm: 'view.reports' } },
   { path: '/files', name: 'files', component: FilesView, meta: { perm: 'view.files' } },
   { path: '/ai-summary', name: 'aiSummary', component: AiSummaryView, meta: { perm: 'view.aiSummary' } },
+  { path: '/bidcrawl', name: 'bidcrawl', component: BidCrawlView, meta: { perm: 'view.bidcrawl' } },
   { path: '/users', name: 'users', component: UserManageView, meta: { perm: 'view.users' } },
   { path: '/roles', name: 'roles', component: RoleManageView, meta: { perm: 'view.roles' } },
   { path: '/audit', name: 'audit', component: AuditView, meta: { perm: 'view.audit' } },

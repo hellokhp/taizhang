@@ -1,0 +1,214 @@
+{
+  "meta": {
+    "id": "cg_11185",
+    "host": "cg.11185.cn",
+    "name": "中国邮政电子采购与物资供应平台",
+    "notes": "由站点探测器自动生成：HTML 列表 https://cg.11185.cn/zgyzcms/category/searchBulletinList.html（ul.newslist > li，关键词参数 goSearch，分页 page，共 13 页）→ 详情页 /biddingBulletin/2026-11-11/142770.html → pdfjs PDF 直链。列表字段为探测出的 CSS/正则规则，正文来自 PDF，已接入 AI 结构化抽取。新配方默认关闭全局采购人白名单，请审核后再启用。",
+    "status": "paused",
+    "version": 3,
+    "entry_url": "https://cg.11185.cn/",
+    "created_by": "ai"
+  },
+  "detail": {
+    "ai": {
+      "cache": true,
+      "fields": [
+        "budget",
+        "fee_note",
+        "scope",
+        "doc_get_start",
+        "doc_get_end",
+        "open_at",
+        "region",
+        "buyer",
+        "bid_no",
+        "agency",
+        "contact",
+        "qualification",
+        "project_period",
+        "bidder_limit",
+        "project_name",
+        "funding",
+        "bid_place",
+        "notice_type"
+      ],
+      "enabled": true,
+      "max_chars": 20000,
+      "timeout_s": 90,
+      "fallback_regex": {
+        "agency": "([\\u4e00-\\u9fa5]{4,30}(?:有限公司|有限责任公司))（招标代理机构）",
+        "bid_no": "(?:招标编号|项目编号|采购编号)[：:]\\s*([A-Za-z0-9\\-_（）()]{4,40})",
+        "budget": "(?:合同估算价|项目预算|采购预算|预算金额|最高限价|预算)[：:\\s]*([^\\n，。；]{1,40})",
+        "contact": "联系人[：:]\\s*([^\\n，。]{1,40})",
+        "open_at": "(?:投标文件递交截止时间|开标时间|响应文件递交截止时间)[：:]\\s*([^\\n，。（]{4,45})",
+        "fee_note": "(?:标书费|文件费|招标文件费|.*?费用)[：:]\\s*([^\\n]{1,60})",
+        "doc_get_end": "获取时间[：:]\\s*从\\s*[^\\n到]{4,40}?\\s*到\\s*([^\\n]{4,40})",
+        "bidder_limit": "中标人数量[：:]\\s*([^\\n，。名]{1,10})",
+        "doc_get_start": "获取时间[：:]\\s*从\\s*([^\\n到]{4,40}?)\\s*到",
+        "project_period": "(?:工期|服务期)[：:]\\s*([^\\n，。]{1,20})"
+      },
+      "prompt_version": "auto-detail-v1"
+    },
+    "pdf": {
+      "enabled": true,
+      "max_bytes": 8388608,
+      "max_chars": 20000,
+      "timeout_s": 30,
+      "iframe_css": "iframe#pdfContainer",
+      "url_template": "https://cg.11185.cn/dzzb/cgUploadController.do?openFileById&id={file_id}",
+      "file_id_regex": "openFileById(?:%26|&)(?:id|fileId)(?:%3D|=)([A-Za-z0-9_-]+)"
+    },
+    "enabled": true,
+    "extract": {
+      "scope": "html",
+      "fields": {
+        "title": {
+          "css": "h1::text",
+          "strip": true,
+          "fallback": [
+            {
+              "css": "h2::text",
+              "strip": true
+            },
+            {
+              "css": "h3::text",
+              "strip": true
+            },
+            {
+              "css": ".topTitle::text",
+              "strip": true
+            }
+          ]
+        }
+      }
+    },
+    "request": {
+      "url": "{url}",
+      "method": "GET",
+      "headers": {
+        "Referer": "https://cg.11185.cn/zgyzcms/category/searchBulletinList.html"
+      }
+    },
+    "id_field": "external_id",
+    "attachments": {
+      "enabled": false
+    },
+    "content_source": "pdf"
+  },
+  "discovery": {
+    "mode": "html_list",
+    "fields": {
+      "url": {
+        "css": "a",
+        "attr": "href"
+      },
+      "title": {
+        "css": "h1::text",
+        "strip": true
+      },
+      "bid_no": {
+        "css": "li span::text",
+        "nth": 0,
+        "strip": true
+      },
+      "publish_at": {
+        "regex": "\\b(20\\d{2})[^\\d]{1,40}?(\\d{1,2})[/-](\\d{1,2})\\b",
+        "template": "{1}-{2}-{3} 00:00"
+      },
+      "external_id": {
+        "group": 1,
+        "regex": "/(\\d{3,})\\.html"
+      },
+      "notice_type": {
+        "css": "li span::text",
+        "nth": 1,
+        "strip": true
+      }
+    },
+    "request": {
+      "url": "https://cg.11185.cn/zgyzcms/category/searchBulletinList.html",
+      "body": null,
+      "method": "GET",
+      "params": {
+        "page": "{page}",
+        "goSearch": "{keyword}",
+        "categoryId": "88"
+      }
+    },
+    "pagination": {
+      "type": "page",
+      "start": 1,
+      "max_pages": 13,
+      "stop_when": [
+        "empty_items",
+        "page_unchanged"
+      ],
+      "page_param": "page"
+    },
+    "row_selector": "ul.newslist > li"
+  },
+  "normalize": {
+    "amount": {
+      "units": {
+        "元": 1,
+        "万元": 10000
+      },
+      "target": "budget"
+    },
+    "filters": {
+      "inherit": "global",
+      "override": {},
+      "buyer_whitelist": false
+    },
+    "keep_url": true
+  },
+  "transport": {
+    "url": "https://cg.11185.cn/zgyzcms/category/searchBulletinList.html",
+    "kind": "http",
+    "retry": {
+      "times": 2,
+      "retry_on": [
+        429,
+        500,
+        502,
+        503,
+        504
+      ],
+      "backoff_s": 5
+    },
+    "method": "GET",
+    "headers": {
+      "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "Accept-Language": "zh-CN,zh;q=0.9"
+    },
+    "encoding": "utf-8",
+    "timeout_s": 25,
+    "trust_env": false,
+    "rate_limit": {
+      "qps": 0.2,
+      "concurrency": 1
+    },
+    "max_response_mb": 5,
+    "total_timeout_s": 30
+  },
+  "validation": {
+    "sample_keyword": "门头",
+    "required_fields": {
+      "url": 1,
+      "title": 1
+    },
+    "expected_nonempty": {
+      "publish_at": 0.8
+    },
+    "page2_must_differ": true,
+    "url_reachable_rate": 0.9,
+    "min_items_per_keyword": 1,
+    "detail_expected_nonempty": {
+      "buyer": 0.5,
+      "scope": 0.5,
+      "open_at": 0.5,
+      "doc_get_end": 0.5
+    }
+  }
+}

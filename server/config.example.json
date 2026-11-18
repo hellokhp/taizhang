@@ -1,0 +1,10 @@
+{
+  "_comment": "PostgreSQL 唯一配置源模板：复制为同目录 config.json 并填写真实值。config.json 已被 .gitignore 忽略。改数据库只需改这一个文件，改完重启后端 / AI Worker / 标讯采集 Worker。",
+  "postgres": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "postgres",
+    "password": "CHANGE_ME",
+    "dbname": "yadecai"
+  }
+}

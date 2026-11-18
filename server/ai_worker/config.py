@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Worker 运行配置：只从环境变量读，绝不 import 后端 main（避免 3.8/3.10 依赖冲突）。"""
+"""Worker 运行配置：绝不 import 后端 main（避免 3.8/3.10 依赖冲突）。
+
+PostgreSQL 参数由 server/shared_config.py 从 server/config.json 统一读取；
+其余 Worker 专属参数（Redis / 存储 / 并发 / 模型）仍从各自环境变量读。
+"""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
+from ..shared_config import pg_conf
+
 BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent.parent            # 项目根（taizhang/）
 
-PG_CONF = {
-    'host': os.environ.get('PG_HOST', '127.0.0.1'),
-    'port': int(os.environ.get('PG_PORT', '5432')),
-    'user': os.environ.get('PG_USER', 'postgres'),
-    'password': os.environ.get('PG_PASSWORD', 'yinhe123.'),
-    'dbname': os.environ.get('PG_DB', 'yadecai'),
-}
+PG_CONF = pg_conf()
 
 
 def _storage_root() -> Path:

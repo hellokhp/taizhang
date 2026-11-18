@@ -76,17 +76,160 @@ chmod 750 /var/lib/taizhang/storage
 
 ### 2.1 PostgreSQL 连接配置
 
-后端读取以下环境变量（未设置时走 `server/main.py` 的默认值 `127.0.0.1:5432 / postgres / yadecai`）：
+**唯一事实源**：`/opt/taizhang/server/config.json` 的 `postgres` 段。后端主进程、AI Worker、标讯采集 CLI/Worker 全部经 `server/shared_config.py` 读取它，改地址 / 账号 / 库名只改这一个文件，改完重启相关进程。
 
-| 变量 | 说明 |
+```bash
+cd /opt/taizhang
+cp server/config.example.json server/config.json
+vim server/config.json          # 填 host / port / user / password / dbname
+python -m server.shared_config  # 打印脱敏摘要并实测连接
+```
+
+| 字段 | 说明 |
 |---|---|
-| `PG_HOST` / `PG_PORT` | PG 地址与端口 |
-| `PG_USER` / `PG_PASSWORD` | 账号密码，**生产必须显式配置** |
-| `PG_DB` | 库名，默认 `yadecai` |
-| `STORAGE_ROOT` | 文件实体根目录 |
-| `TZ` | 固定 `Asia/Shanghai` |
+| `host` / `port` | PG 地址与端口 |
+| `user` / `password` | 账号密码，**生产必须改成强密码** |
+| `dbname` | 库名，默认 `yadecai` |
 
-> **两个 program 的 `PG_*` 必须逐项一致**：主进程与 AI Worker 连的不是同一个库时，任务与结果会分家。
+> `server/config.json` 含密码，已由根目录 `.gitignore` 忽略，代码库只提交模板 `config.example.json`。
+> 兼容保留：显式设置 `PG_*` 环境变量、或用 `TAIZHANG_CONFIG` 指定另一份配置文件可临时覆盖；但项目自带的 `server/ai_worker/.env` 与 supervisor `environment` 已不再设置 `PG_*`，避免多份配置互相打架。
+> `STORAGE_ROOT` / `TZ` / Redis / 模型密钥仍由各进程环境注入，属各自专属配置，本轮未动。
+
+### 2.1a 标讯采集：详情正文 AI 抽取
+
+金采网（`cfcpn`）等平台采用**两段式**采集：列表接口拿摘要 → 详情接口拿公告正文 → AI 从正文抽结构化字段 → 拼接详情页 URL 入库。
+
+- **模型配置**：复用 `server/ai_worker/.env` 的 `DASHSCOPE_API_KEY` / `DASHSCOPE_BASE_URL` / `LLM_TEXT_MODEL`（或 `LLM_API_KEY` / `LLM_BASE_URL`）。该 Key 同时供 AI 配方生成与详情解析使用，不需要第二份配置。
+- **依赖**：`server/requirements.txt` 需包含 `openai>=1.40`、`python-dotenv>=1.0`、`pypdf>=4.0`（正文为 PDF 的站点需要）。**多套 Python 并存时，每套实际跑后端/worker 的解释器都要装**：`python -c "import pypdf"` 逐个确认。
+- **首次建表**：`python -m server.bidcrawl.cli init`（幂等，会加 `bid_item.detail jsonb` 列与 `bid_detail_ai` 缓存表），再 `import-recipes --path server/bidcrawl/recipes/cfcpn.json`。
+- **成本控制**：AI 结果按 `sha1(平台 + prompt 版本 + 清洗后正文)` 存进 `bid_detail_ai`。同一公告被多个关键词命中、以及之后每轮跑批都直接读缓存，只有**首次遇到新正文**才调用模型；详情响应本身也走 `bid_fetch_cache`（TTL 7 天）。
+- **降级**：无 Key / 模型超时 / 返回非法 JSON 时自动改用配方里的正则兜底，采集不中断；`bid_item.detail->'ai'->>'source'` 记录 `llm` / `cache` / `fallback`，便于审计。
+- **关闭 AI**：任务参数加 `with_ai=false`，或 CLI 用 `--no-ai`（只走确定性正则）。
+- **调试单条**：`python -m server.bidcrawl.cli detail --platform cfcpn --keyword 门头 --limit 1`。
+- **站点频控**：配方 `transport.rate_limit.qps` 同时约束列表与详情请求，生产请保持 `0.1`（约 10 秒一次），不要用 `BIDCRAWL_RATE_SCALE=0`（仅本地联调可临时关闭限速）。
+
+### 2.1b 正文为 PDF 的站点（cg.11185.cn）
+
+中国邮政电子采购平台的详情页只有一个 pdfjs iframe，公告正文在 PDF 文件里。
+配方 `server/bidcrawl/recipes/cg_11185.json` 声明 `detail.pdf`：
+
+- `pdf_text.py` 从 iframe 的 `viewer.html?file=` 参数反转义出 PDF 直链（`%26`→`&`、`%3D`→`=`）。
+  该直链是 `Content-Disposition: attachment` 的下载接口，必须按**二进制**下载再解析，不能当网页解析。
+  解析库按 `pypdf → PyMuPDF → pdfplumber → pdfminer → PyPDF2` 自动降级，任意装一个即可；
+  按 PDF URL hash 缓存文本到 `bid_fetch_cache`（同样 7 天），再交给同一套 AI / 正则抽取；
+  `pdf_url` 会写进 `bid_item.detail` 便于追溯。
+- 列表是 HTML：`searchBulletinList.html?categoryId=88&goSearch={keyword}&page={page}`，
+  `ul.newslist > li` 10 条/页，生产 `qps=0.2`、`max_pages=13` 为硬上限。
+- 部署：`import-recipes --path server/bidcrawl/recipes/cg_11185.json`；
+  验证 `python -m server.bidcrawl.cli verify --platform cg_11185 --keyword 门头`。
+- **试跑校验报「PDF 正文为空或过短」时**：现在错误信息会带上具体原因
+  （未安装解析库 / 下载 HTTP 状态 / 响应不是 PDF / 扫描件无文本层），并在校验卡显示
+  `HTTP 状态 · 字节数 · 附件文件名 · 实际使用的解析库`。
+  最常见原因是后端那套 Python 没装任何解析库，执行 `pip install -r server/requirements.txt`
+  后**重启后端**即可（旧代码在函数内 import，装完即可生效，无需重启也能恢复）。
+- 所有解析库都缺失或下载失败时正文为空，AI 自动走降级，不影响列表入库；
+  扫描件 / 图片型 PDF 尚无 OCR，需在页面标注「正文未解析」。
+
+### 2.1c SPA 站点：无头浏览器嗅探（jc.abchina.com.cn）
+
+农银e采等站点是 SPA：入口 HTML 只有空壳，主包是 eval 混淆的 webpack 产物，
+接口只出现在异步 chunk 里——**纯 HTTP 抓不到**。系统在静态探测全部失败后，
+会自动用**本机 Edge/Chrome + CDP** 无头渲染页面并拦截 XHR，再据此生成配方。
+
+- **运行依赖**：目标机需有浏览器。Windows 自带 Edge 即可；Linux 装
+  `chromium` 或 `google-chrome`，也可用 `BIDCRAWL_BROWSER=/path/to/chrome` 指定。
+  无需安装 Playwright（内网 pip 常装不到），只用到环境里已有的 `websockets`
+  （`uvicorn[standard]` 已带入）。
+- **行为**：探测阶段会出现「浏览器嗅探」一步，显示实际使用的浏览器与捕获请求数；
+  无浏览器时该步为 `skip` 并说明原因，其余站点完全不受影响。
+- **资源保护**：同一时刻只允许一个嗅探进程（进程内互斥锁），单次超时约 40 秒，
+  临时 user-data-dir 用完即删。若不想启用，设 `BIDCRAWL_NO_BROWSER=1`。
+- **验证**：`python -m server.bidcrawl.browser_probe "<列表页URL>" 门楣`
+  可单独测试本机能否嗅探成功。
+
+### 2.1d 嵌套 dto 接口 + HTML 详情（cg.psbc.com）
+
+邮储「邮银易采」的列表接口是 `POST /cms/api/search/searchKeyWord`，请求体嵌套：
+
+```json
+{"pageNo":1,"pageSize":50,"dto":{"keyWords":"{keyword}","siteId":"725"}}
+```
+
+- 接口参数 `siteId/categoryId` 不在入口页，而在列表页隐藏域
+  （`<input type="hidden" name="chunkSiteId" / name="chunkId">`）。探测器会自动
+  「入口页 → 导航里的招标信息列表页 → 读隐藏域 → 回填请求体」；`cms=/cms`
+  这类全局前缀用于拼接口地址，不会写进请求体。
+- 关键词接口无法识别时，会生成 `minimal` 变体（去掉 `categoryId` 等过滤条件，
+  只留 `siteId` + 关键词），避免「分类是资格预审、搜不到招标公告」。
+- 详情页是 CMS 静态页，正文在 `.content`（HTML 而非 PDF），配方用
+  `detail.content_css`，`detail.request.url={url}`；AI 抽取与 PDF 型共用同一套字段。
+- 影响字段：`publishDate` 形如 `Tue Apr 01 09:17:32 UTC 2025`，`normalize.parse_datetime`
+  已支持该 Java Date 格式。
+- 部署：`import-recipes --path server/bidcrawl/recipes/cg_psbc.json`；
+  验证 `python -m server.bidcrawl.cli verify --platform cg_psbc --keyword 门头`。
+- 响应体积：搜索接口会带 `content` 摘要，50 条约 600KB；配方 `max_response_mb` 已设 20。
+  若站点对 `pageSize` 上限更严，`iter_pages` 会自动降档重试。
+
+### 2.1e 生成配方：证据模式（curl + 返回样本）
+
+「平台与配方 → AI 添加平台」现在有三种模式可切换，**默认 `接口 JSON`**：
+
+| 模式 | 需要填 | 说明 |
+| --- | --- | --- |
+| 接口 JSON（`api_list`） | 列表 curl + 列表 JSON 样本；详情 curl + 详情 JSON/HTML 样本 | 有数据接口的站点，最稳 |
+| HTML 列表（`html_list`） | 列表 curl + 列表 HTML 源码；详情 curl + 详情 HTML 源码 | CMS 型站点，正文可为 PDF |
+| 自动探测（`auto`） | 入口 URL + 样本关键词 | 旧链路，结构简单的站点兜底 |
+
+- 取证方法：浏览器 F12 → Network → 找到列表/详情请求 → 右键 **Copy as cURL (bash)**；
+  返回样本就是该请求的 Response（JSON）或页面源码（Ctrl+U）。
+- 系统只做确定性反推：`items_path / total_path / row_selector / 字段 CSS /
+  关键词参数 / 分页参数 / 详情请求模板 / 详情页 URL 模板 / PDF 直链`，
+  然后三级校验：结构校验 → **样本回测** → 真实请求试跑。
+- 生成的配方 `status=paused`、关闭全局采购人白名单，审核后在「配方」里启用。
+- **详情页 URL 示例**：列表结果里没有详情页链接时（接口型站点很常见），在这里粘贴
+  任意一条公告的**真实地址**即可，系统会用列表行里的 id 字段套成
+  `...?messageId={messageId}` 模板；直接写 `{messageId}` 也可以。不填也不会崩，
+  但跳转链接只能用兜底地址、可能打不开，时间线会明确告警。
+- **HTML 列表模式**还支持写 `https://站点域名{href}`（用行内第一个链接拼详情地址），
+  适合列表里混着分类/栏目链接的站点（如 365trade）。
+- 详情样本是网页时，配方一律 `GET {url}` 取页面（即使你贴的详情 curl 是接口地址），
+  避免拿接口去解析 `.content` 导致正文为空。
+- **HTML 列表模式的兼容性**：行元素本身是 `<a>`（`<div><a class="item">…</a>×N`）
+  也能识别；类名里的 Tailwind 工具类（`sm:flex`、`w-1/2`）不会拼成非法 CSS 选择器，
+  反推出的选择器一律先回测命中才写入配方。解析失败时接口返回可读提示（HTTP 200 +
+  `ok:false`），不会再抛 500；若真出现内部异常，错误里带末几行 traceback 便于排查。
+- **PDF 正文源按证据挑选**：门户页脚常驻《平台注册规则.pdf》这类文档，而且列表页也有
+  同样几个链接。系统会优先用「正文容器内 + 锚文本像附件」的 PDF；文档名像规则/指南/
+  注册说明、或同一份 PDF 也出现在列表页，一律排除；正文容器本身有 ≥300 字时直接以
+  HTML 为正文。试跑还会校验 PDF 内容是否像公告（命中标题或招标用语），防止"能打开
+  但内容是帮助文档"的假成功。
+- 列表里的相对链接（`/zgczb/897997.jhtml`）会按 `meta.base_url` 自动补成绝对地址，
+  否则详情请求会因「URL missing protocol」静默失败（表现就是：列表能入库、没详情）。
+- 页码在路径里（`search.jspx` → `search_2.jspx`）的站点会被自动识别成
+  `pagination.page_in_url=true`，第 1 页与后续页分别取 `first_url` / `url_template`。
+- **详情页被反爬中间页拦截**（阿里云 `acw_sc__v2`、瑞数 `$_ts`、加速乐
+  `__jsl_clearance`，常见 200/403/412 + 一段 JS 挑战脚本，正文 0 字符）时，
+  会自动用系统 Edge/Chrome 无头打开该页、跑完挑战脚本（UA 覆盖为普通桌面
+  Chrome，避免无头 UA 被直接 400），
+  拿回渲染后的 HTML，并把换到的 cookie 复用给后续详情请求（约 1 小时有效）。
+  因此**运行机需要装有 Edge 或 Chrome**；路径可用 `BIDCRAWL_BROWSER` 指定，
+  想彻底禁用设 `BIDCRAWL_NO_BROWSER=1`（此时遇到挑战会给出明确报错，不会静默空正文）。
+  反爬中间页不会被写入详情缓存，历史缓存里的中间页也会被忽略并重新抓取。
+- 部署无需额外 Python 依赖（纯 httpx + parsel + websockets，均已在 `requirements.txt`）；
+  过盾仅额外依赖本机浏览器。
+- 列表页若同页有多份结构相同的 `<ul>`（站点切换器、栏目菜单、公告列表），
+  生成器会用「最近带 class 的祖先 + nth-of-type」锚定公告那一份，并对「链接都指向
+  别的域名」的行重罚；用户填 `https://host{href}` 时，若样本里 href 本身是绝对
+  地址，模板会自动退化为 `{_href}`，不会拼出双域名（曾表现为 `getaddrinfo failed`）。
+  接口：`POST /api/bidcrawl/analyze`，`mode` 为 `api_list` / `html_list` 时走证据模式。
+- 注意：依赖登录态的站点，curl 里的 Cookie 会过期；过期后重新粘贴一次 curl
+  生成新版本即可（旧版本保留可回滚）。
+- **排查「改了没生效」**：`POST /api/bidcrawl/analyze` 的响应里带
+  `generator_version`（当前 `2026-11-17.4`）；对不上说明进程还是旧代码，重启即可。
+- 识别不出列表行时，返回的 `error` / `diag` 会写明原因（候选组数、最大组行数、
+  是否反推不出选择器），而不是笼统一句「未识别出公告行」。
+- 自检：`python -m server.bidcrawl.selftest`（151 项，含证据模式、反爬降级、
+  PDF 正文源选择、列表反推健壮性与诊断信息等离线用例）。
 
 ### 2.2 账号配置
 
@@ -229,7 +372,7 @@ sudo tar xzf /var/backups/taizhang/storage_XXXX.tar.gz -C /var/lib/taizhang
 ```bash
 supervisorctl stop taizhang taizhang-ai-worker
 sudo -u postgres psql -c "CREATE DATABASE yadecai_new OWNER taizhang;"
-# 把两个 program 的 environment 里 PG_DB 改为 yadecai_new，确认无误后启动
+# 把 server/config.json 的 postgres.dbname 改为 yadecai_new，确认无误后启动
 supervisorctl start taizhang taizhang-ai-worker
 ```
 

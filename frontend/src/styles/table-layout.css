@@ -1,0 +1,149 @@
+/* ================================================================
+   数据表格布局基线（配合 lib/useTableLayout.js）
+   宽度规则只限定在 .dt-table，不写全局 table/th/td，避免误伤其他表格。
+   ================================================================ */
+
+.dt-wrap {
+  position: relative;
+  overflow: auto;
+  max-height: var(--dt-max-h, 60vh);
+  border-top: 1px solid var(--line2);
+  overscroll-behavior: contain;
+}
+
+.dt-wrap::-webkit-scrollbar { width: 9px; height: 9px; }
+.dt-wrap::-webkit-scrollbar-thumb {
+  background: #D9D2C2;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.dt-wrap::-webkit-scrollbar-thumb:hover { background: #C0B7A2; background-clip: padding-box; }
+.dt-wrap::-webkit-scrollbar-track { background: transparent; }
+
+.dt-table {
+  /* 列窄时铺满容器，列宽时横向滚动，绝不压缩内容 */
+  width: max(100%, var(--dt-w, 100%));
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.dt-table th,
+.dt-table td {
+  position: relative;
+  padding: var(--dt-row-pad, 9px) 12px;
+  overflow: hidden;
+  vertical-align: middle;
+  text-align: left;
+  border-bottom: 1px solid var(--line2);
+}
+
+.dt-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--dt-head-bg, #FCFAF5);
+  font-weight: 600;
+  font-size: 11.5px;
+  color: var(--mut, #59636F);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dt-table tbody tr {
+  height: var(--dt-row-h, 40px);
+}
+
+.dt-table tbody tr:hover td { background: #FDFBF6; }
+
+/* 短文本：单行省略，同时提供 title 查看全文 */
+.dt-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 长文本：换行，长英文与 URL 不撑破 */
+.dt-wrap-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 金额 / 数量：右对齐 + 等宽数字 + 不换行 */
+.dt-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.dt-center { text-align: center; }
+
+.dt-empty { color: var(--sub, #939AA3); }
+
+/* 列宽手柄：贴在表头右缘 */
+.dt-col-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 1;
+}
+
+.dt-col-handle::after {
+  content: '';
+  position: absolute;
+  top: 22%;
+  right: 2px;
+  width: 1px;
+  height: 56%;
+  background: var(--line, #E4DED1);
+}
+
+.dt-col-handle:hover::after {
+  background: var(--pri, #1B3149);
+  width: 2px;
+}
+
+/* 行高手柄：贴在首列底部 */
+.dt-row-handle {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 7px;
+  cursor: row-resize;
+  user-select: none;
+}
+
+/* 表格布局工具条 */
+.dt-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border: 1px solid var(--line2);
+  border-radius: 9px;
+  background: #FCFAF5;
+}
+.dt-tools .lab {
+  font-size: 11px;
+  color: var(--sub);
+  padding: 0 4px 0 2px;
+  white-space: nowrap;
+}
+.dt-tools .btnb { padding: 2px 6px; }
+
+@media (max-width: 1024px) {
+  .dt-table th,
+  .dt-table td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
