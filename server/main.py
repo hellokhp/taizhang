@@ -10,473 +10,98 @@
         可用 TAIZHANG_CONFIG 指定配置文件，或临时用 PG_* 环境变量覆盖。
 首次启动自动建表；若 PG 为空且存在历史 SQLite 文件 server/data.db，会自动迁移其中全部数据。
 """
-import hashlib
 import json
 import os
-import threading
 import time
 import uuid
 from datetime import date
 from pathlib import Path
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import guard
-from .shared_config import pg_conf
+# ---- 阶段 1 重构：公共基础设施已抽到 server/common/，这里统一再导入同名符号，
+# 使下方 1000+ 行路由代码零改动。详见 server/common/__init__.py 说明。 ----
+from . import guard                      # 保留：路由里直接用 guard.keyed/unlocked/heavy 等
+from .common import guard as _cg         # 与 server.guard 同一转发层，仅取 lock 实例
+from .common.audit import FIELD_LABELS, audit_diff, audit_write
+from .common.auth_tables import (
+    backfill_role_perms,
+    init_db,
+    migrate_from_sqlite,
+    seed_roles,
+    sync_users,
+    upsert_file_user,
+)
+from .common.catalog import (
+    FIELD_CATALOG,
+    FIELD_KEYS,
+    LEVEL_KEYS,
+    LEVELS,
+    MASK_CATALOG,
+    MASK_KEYS,
+    PERM_CATALOG,
+    PERM_KEYS,
+    ROLE_SEEDS,
+    SCOPES,
+)
+from .common.database import BASE, DB_PATH, ROOT, USERS_PATH, PgDB, _conn, db
+from .common.security import (
+    current_user,
+    filter_out,
+    field_level,
+    field_rule,
+    guard_in,
+    hash_pw,
+    mask_value,
+    need,
+    norm_field_perms,
+    old_payload,
+    perm_of,
+    require_admin,
+)
 
-BASE = Path(__file__).resolve().parent
-ROOT = BASE.parent
-DB_PATH = BASE / 'data.db'          # 历史 SQLite 数据文件（仅用于一次性迁移，迁移后作为回滚备份保留）
-USERS_PATH = BASE / 'users.json'
-
-PG_CONF = pg_conf()
-
-# 平台卡死治理：全局锁带等待上限（默认 3s），超时返回 503 而不是无限排队。
-# 可重入性必须保留；纯读路径用 guard.unlocked()，慢写用 guard.keyed() + tx()。
-lock = guard.TimedRLock()
-_local = threading.local()
-
-
-def _conn():
-    """每线程一个连接（FastAPI 同步接口在线程池中执行，psycopg2 连接不可跨线程共享）。"""
-    conn = getattr(_local, 'conn', None)
-    if conn is None or conn.closed:
-        conn = psycopg2.connect(**PG_CONF)
-        conn.autocommit = False
-        # 平台卡死治理 第 1 步：前台连接一律设上限，绝不允许无限等待 / 无限挂起。
-        #   lock_timeout                      3s   行锁等待，超时立即报错而非拖住全站
-        #   statement_timeout                 10s  单条慢 SQL 自动终止（PG 是逐语句计时，
-        #                                        逐行写的大导入不受影响）
-        #   idle_in_transaction_session...   30s  开事务不干活的连接自动断开
-        # 逐条 SET + 逐条提交：老版本 PG 不支持某一条时，一次 rollback 不会把
-        # 前面已生效的设置一起撤销。Worker 连接独立设 300s，见 ai_worker/db.py。
-        cur = conn.cursor()
-        for sql in ("SET lock_timeout = '3s'",
-                    "SET statement_timeout = '10s'",
-                    "SET idle_in_transaction_session_timeout = '30s'"):
-            try:
-                cur.execute(sql)
-                conn.commit()
-            except Exception:
-                conn.rollback()
-        cur.close()
-        _local.conn = conn
-    return conn
-
-
-class PgDB:
-    """沿用原 SQLite 调用习惯（? 占位符 / executemany / commit / executescript）访问 PostgreSQL。
-    读语句执行完立即结束只读事务；写语句由调用方 commit() 提交，异常时自动回滚。"""
-
-    @staticmethod
-    def _sql(sql):
-        return sql.replace('?', '%s')
-
-    def execute(self, sql, params=()):
-        conn = _conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        try:
-            cur.execute(self._sql(sql), params)
-            if sql.lstrip()[:6].upper() == 'SELECT':
-                conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        return cur
-
-    def executemany(self, sql, seq):
-        conn = _conn()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        try:
-            cur.executemany(self._sql(sql), seq)
-        except Exception:
-            conn.rollback()
-            raise
-        return cur
-
-    def executescript(self, script):
-        conn = _conn()
-        cur = conn.cursor()
-        try:
-            cur.execute(script)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-
-    def commit(self):
-        _conn().commit()
-
-    def rollback(self):
-        _conn().rollback()
+# 全局锁实例现在由 common.guard 持有（全进程唯一）；下方 `with lock:` 与
+# auth_tables 里的 `with guard.lock:` 用的是同一把锁。
+lock = _cg.lock
 
 
-db = PgDB()
 
 
-def migrate_from_sqlite():
-    """把历史 SQLite 数据（server/data.db）一次性迁移到 PostgreSQL。
-    仅当 PG 中还没有用户/角色数据时执行，重复启动不会重复写入。"""
-    import sqlite3
-
-    if not DB_PATH.exists():
-        return
-    if db.execute('SELECT 1 FROM users LIMIT 1').fetchone() or \
-            db.execute('SELECT 1 FROM roles LIMIT 1').fetchone():
-        return
-    src = sqlite3.connect(str(DB_PATH))
-    src.row_factory = sqlite3.Row
-    moved = {}
-    try:
-        users = src.execute(
-            "SELECT username, pass_hash, COALESCE(display_name,'') AS display_name, "
-            "COALESCE(is_admin,0) AS is_admin, COALESCE(role_key,'staff') AS role_key "
-            "FROM users").fetchall()
-        for r in users:
-            db.execute('INSERT INTO users(username, pass_hash, display_name, is_admin, role_key) '
-                       'VALUES(?,?,?,?,?) ON CONFLICT(username) DO NOTHING',
-                       (r['username'], r['pass_hash'], r['display_name'],
-                        r['is_admin'], r['role_key']))
-        moved['users'] = len(users)
-
-        roles = src.execute('SELECT key, name, is_system, perms, field_perms, data_scope '
-                            'FROM roles').fetchall()
-        for r in roles:
-            db.execute('INSERT INTO roles(key, name, is_system, perms, field_perms, data_scope) '
-                       'VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO NOTHING',
-                       (r['key'], r['name'], r['is_system'], r['perms'],
-                        r['field_perms'], r['data_scope']))
-        moved['roles'] = len(roles)
-
-        rows = src.execute('SELECT rid, payload, updated_by, updated_at FROM rows').fetchall()
-        for r in rows:
-            db.execute('INSERT INTO rows(rid, payload, updated_by, updated_at) VALUES(?,?,?,?) '
-                       'ON CONFLICT(rid) DO NOTHING',
-                       (r['rid'], r['payload'], r['updated_by'], r['updated_at']))
-        moved['rows'] = len(rows)
-
-        deleted = src.execute('SELECT rid, ts FROM deleted').fetchall()
-        for r in deleted:
-            db.execute('INSERT INTO deleted(rid, ts) VALUES(?,?) ON CONFLICT(rid) DO NOTHING',
-                       (r['rid'], r['ts']))
-        moved['deleted'] = len(deleted)
-
-        sessions = src.execute('SELECT token, username, created FROM sessions').fetchall()
-        for r in sessions:
-            db.execute('INSERT INTO sessions(token, username, created) VALUES(?,?,?) '
-                       'ON CONFLICT(token) DO NOTHING',
-                       (r['token'], r['username'], r['created']))
-        moved['sessions'] = len(sessions)
-
-        logs = src.execute('SELECT id, ts, username, rid, action, field, old_value, '
-                           'new_value, allowed FROM audit_log ORDER BY id').fetchall()
-        for r in logs:
-            db.execute('INSERT INTO audit_log(id, ts, username, rid, action, field, '
-                       'old_value, new_value, allowed) VALUES(?,?,?,?,?,?,?,?,?) '
-                       'ON CONFLICT(id) DO NOTHING',
-                       (r['id'], r['ts'], r['username'], r['rid'], r['action'], r['field'],
-                        r['old_value'], r['new_value'], r['allowed']))
-        moved['audit_log'] = len(logs)
-        db.commit()
-        # 自增序列对齐历史最大 id，避免后续插入主键冲突
-        db.execute("SELECT setval(pg_get_serial_sequence('audit_log','id'), "
-                   "COALESCE((SELECT MAX(id) FROM audit_log), 1), "
-                   "EXISTS(SELECT 1 FROM audit_log))")
-        db.commit()
-        print('[migrate] SQLite -> PostgreSQL 完成：' + json.dumps(moved, ensure_ascii=False))
-    except Exception as e:
-        db.rollback()
-        print('[migrate] 迁移失败（服务继续使用 PG 空库）：' + repr(e))
-    finally:
-        src.close()
-
-
-def init_db():
-    """建表（幂等）并尝试迁移历史 SQLite 数据。"""
-    with lock:
-        db.executescript('''
-        CREATE TABLE IF NOT EXISTS users(
-          username TEXT PRIMARY KEY,
-          pass_hash TEXT NOT NULL,
-          display_name TEXT DEFAULT '',
-          is_admin INTEGER DEFAULT 0,
-          role_key TEXT DEFAULT 'staff'
-        );
-        CREATE TABLE IF NOT EXISTS rows(
-          rid TEXT PRIMARY KEY,
-          payload TEXT NOT NULL,
-          updated_by TEXT DEFAULT '',
-          updated_at DOUBLE PRECISION NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_rows_ts ON rows(updated_at);
-        CREATE TABLE IF NOT EXISTS deleted(
-          rid TEXT PRIMARY KEY,
-          ts DOUBLE PRECISION NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS sessions(
-          token TEXT PRIMARY KEY,
-          username TEXT NOT NULL,
-          created DOUBLE PRECISION NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS roles(
-          key TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          is_system INTEGER DEFAULT 0,
-          perms TEXT NOT NULL DEFAULT '{}',
-          field_perms TEXT NOT NULL DEFAULT '{}',
-          data_scope TEXT DEFAULT 'ALL'
-        );
-        CREATE TABLE IF NOT EXISTS audit_log(
-          id BIGSERIAL PRIMARY KEY,
-          ts DOUBLE PRECISION NOT NULL,
-          username TEXT NOT NULL,
-          rid TEXT DEFAULT '',
-          action TEXT NOT NULL,
-          field TEXT NOT NULL,
-          old_value TEXT DEFAULT '',
-          new_value TEXT DEFAULT '',
-          allowed INTEGER DEFAULT 1
-        );
-        CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
-        CREATE INDEX IF NOT EXISTS idx_deleted_ts ON deleted(ts);
-        CREATE TABLE IF NOT EXISTS daily_reports(
-          username TEXT NOT NULL,
-          rdate TEXT NOT NULL,
-          content TEXT DEFAULT '',
-          plan TEXT DEFAULT '',
-          updated_at DOUBLE PRECISION NOT NULL,
-          PRIMARY KEY(username, rdate)
-        );
-        CREATE TABLE IF NOT EXISTS bid_fs_dir(
-          rid TEXT PRIMARY KEY,
-          node_id TEXT NOT NULL,
-          path TEXT DEFAULT '',
-          tender_node_id TEXT DEFAULT '',
-          bid_node_id TEXT DEFAULT '',
-          created_at DOUBLE PRECISION NOT NULL
-        );
-        ''')
-        # 老库升级：bid_fs_dir 补「招标文件 / 标书」两个子目录的节点 id（幂等）
-        for col in ('tender_node_id', 'bid_node_id'):
-            try:
-                db.execute('ALTER TABLE bid_fs_dir ADD COLUMN ' + col + " TEXT DEFAULT ''")
-                db.commit()
-            except Exception:
-                db.rollback()
-        migrate_from_sqlite()
-        # 删除墓碑只用于增量同步回放，保留 90 天足够覆盖长期离线客户端，避免表无限增长
-        db.execute('DELETE FROM deleted WHERE ts < ?', (time.time() - 90 * 86400,))
-        db.commit()
 
 
 init_db()
 
 # ---------------- 权限模型 ----------------
 # 台账 48 个字段（与前端 lib/fields.js 的 F 保持一致，用于权限矩阵与字段屏蔽）
-FIELD_CATALOG = [
-    ('projectName', '项目名称', '项目基础'), ('bidNo', '招标编号', '项目基础'),
-    ('pkg', '标段/包号', '项目基础'), ('agency', '代理机构', '项目基础'),
-    ('owner', '采购单位（业主）', '项目基础'), ('region', '项目所在地', '项目基础'),
-    ('method', '招标方式', '项目基础'), ('bizType', '业务类型', '项目基础'),
-    ('projType', '类型', '项目基础'), ('industry', '行业', '项目基础'),
-    ('province', '省份', '项目基础'),
-    ('deadline', '投标截止时间', '时间与地点'), ('openTime', '开标时间', '时间与地点'),
-    ('openAddr', '开标地点', '时间与地点'),
-    ('budget', '预算/最高限价（元）', '金额与保证金'), ('ourPrice', '我方报价（元）', '金额与保证金'),
-    ('bondAmount', '投标保证金金额（元）', '金额与保证金'), ('bondType', '保证金形式', '金额与保证金'),
-    ('bondStatus', '投标保证金状态', '金额与保证金'),
-    ('bondBackDate', '投标保证金退回时间', '金额与保证金'),
-    ('bondIssuer', '投标保函开具行/收款单位', '金额与保证金'),
-    ('bondNo', '投标保函/凭证编号', '金额与保证金'), ('bondPayDate', '投标缴纳/开具日期', '金额与保证金'),
-    ('bondDue', '投标保函有效期', '金额与保证金'),
-    ('perfAmount', '履约保证金金额（元）', '金额与保证金'), ('perfStatus', '履约保证金状态', '金额与保证金'),
-    ('perfBackDate', '履约保证金退回时间', '金额与保证金'),
-    ('perfIssuer', '履约保函开具行/收款单位', '金额与保证金'),
-    ('perfNo', '履约保函/凭证编号', '金额与保证金'), ('perfPayDate', '履约缴纳/开具日期', '金额与保证金'),
-    ('perfDue', '履约保函有效期', '金额与保证金'),
-    ('lead', '标书负责人', '人员分工'), ('copilot', '协作人', '人员分工'),
-    ('reviewer', '审核人', '人员分工'),
-    ('bidStatus', '标书状态', '标书进度'), ('bidWaitAt', '未开始时间', '标书进度'),
-    ('bidStartAt', '进行中时间', '标书进度'), ('bidEndAt', '已结束时间', '标书进度'),
-    ('bidEffort', '标书投入时间', '标书进度'),
-    ('docFee', '购买标书费（元）', '项目开销'), ('travelFee', '差旅费（元）', '项目开销'),
-    ('sampleFee', '样品费（元）', '项目开销'),
-    ('result', '开标结果', '开标结果'), ('winner', '中标单位', '开标结果'),
-    ('winAmount', '中标金额（元）', '开标结果'), ('rank', '我方排名', '开标结果'),
-    ('noticeUrl', '中标公告链接', '开标结果'), ('remark', '备注', '开标结果')
-]
-FIELD_KEYS = [f[0] for f in FIELD_CATALOG]
 
 # 模块/操作权限（新增功能模块时在这里追加一项即可，前端自动出现勾选项）
-PERM_CATALOG = [
-    ('view.dashboard', '首页看板', '页面'),
-    ('view.manage', '投标管理', '页面'),
-    ('view.timeline', '标源总览', '页面'),
-    ('view.assign', '项目分配表', '页面'),
-    ('view.alerts', '需要处理', '页面'),
-    ('view.reports', '工作日报', '页面'),
-    ('view.users', '用户管理', '页面'),
-    ('view.roles', '角色与权限', '页面'),
-    ('view.audit', '审计日志', '页面'),
-    ('view.files', '文件存储', '页面'),
-    ('view.aiSummary', '开标汇总', '页面'),
-    ('view.bidcrawl', '标讯采集', '页面'),
-    ('bidcrawl.manage', '标讯采集 · 配置/提交任务', '操作'),
-    ('view.schedule', '标讯采集 · 定时任务（查看，需同时开「标讯采集」）', '页面'),
-    ('schedule.create', '标讯采集 · 定时任务（新建）', '操作'),
-    ('schedule.update', '标讯采集 · 定时任务（修改/立即执行）', '操作'),
-    ('schedule.delete', '标讯采集 · 定时任务（删除）', '操作'),
-    ('ai.generate', '开标汇总 · 生成/复核/重试', '操作'),
-    ('ai.confirm', '开标汇总 · 定稿', '操作'),
-    ('ai.layout', '开标汇总 · 布局管理', '操作'),
-    ('bid.edit', '台账 · 新增/编辑', '操作'),
-    ('bid.delete', '台账 · 删除', '操作'),
-    ('bid.import', '台账 · 导入', '操作'),
-    ('bid.export', '台账 · 导出/模板', '操作'),
-    ('file.admin', '存储 · 全局管理（回收站/备份/日志）', '操作'),
-    ('report.viewOthers', '日报 · 查看其他人员数据', '操作'),
-]
-PERM_KEYS = [p[0] for p in PERM_CATALOG]
 
 # 字段权限四档（对应流程文档：隐藏 / 脱敏 / 只读 / 可写）
-LEVELS = [
-    ('writable', '可编辑'), ('readonly', '只读'), ('masked', '脱敏'), ('hidden', '不可见')
-]
-LEVEL_KEYS = [l[0] for l in LEVELS]
 # 脱敏规则（仅用于 masked 档）
-MASK_CATALOG = [
-    ('amount', '金额（保留首位，如 1***）'), ('phone', '手机号（138****1234）'),
-    ('name', '姓名/单位（保留首字，如 张**）'), ('text', '文本（保留前2字，如 某某***）'),
-    ('full', '全部（***）')
-]
-MASK_KEYS = [m[0] for m in MASK_CATALOG]
 # 行级数据范围（台账无部门字段，DEPT 暂未启用；新增部门字段后在此扩展）
-SCOPES = [('ALL', '全部数据'), ('SELF', '仅本人相关（负责人/协作人/审核人）')]
-
-_ALL_FIELDS_READONLY = {k: {'level': 'readonly', 'mask': 'full'} for k in FIELD_KEYS}
-
-ROLE_SEEDS = [
-    ('manager', '投标经理', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
-                             'view.audit': 1, 'view.files': 1, 'view.aiSummary': 1, 'ai.generate': 1, 'ai.confirm': 1, 'ai.layout': 1,
-                             'bid.edit': 1, 'bid.delete': 1, 'bid.import': 1,
-                             'bid.export': 1, 'file.admin': 1, 'report.viewOthers': 1}, {}, 'ALL'),
-    ('staff', '投标专员', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
-                           'view.audit': 0, 'view.files': 1, 'view.aiSummary': 1, 'ai.generate': 1, 'ai.confirm': 1, 'ai.layout': 0,
-                           'bid.edit': 1, 'bid.delete': 0, 'bid.import': 1,
-                           'bid.export': 1, 'file.admin': 0, 'report.viewOthers': 0}, {}, 'ALL'),
-    ('viewer', '只读查看', {'view.dashboard': 1, 'view.manage': 1, 'view.timeline': 1, 'view.assign': 1, 'view.alerts': 1, 'view.reports': 1, 'view.users': 0, 'view.roles': 0,
-                            'view.audit': 0, 'view.files': 1, 'view.aiSummary': 1, 'ai.generate': 0, 'ai.confirm': 0, 'ai.layout': 0,
-                            'bid.edit': 0, 'bid.delete': 0, 'bid.import': 0,
-                            'bid.export': 0, 'file.admin': 0, 'report.viewOthers': 0}, _ALL_FIELDS_READONLY, 'ALL'),
-]
 
 
-def seed_roles():
-    """初始化内置角色（已存在则跳过，不覆盖管理员改动）。"""
-    with lock:
-        for key, name, perms, fp, scope in ROLE_SEEDS:
-            if db.execute('SELECT 1 FROM roles WHERE key=?', (key,)).fetchone():
-                continue
-            db.execute('INSERT INTO roles(key, name, is_system, perms, field_perms, data_scope) '
-                       'VALUES(?,?,1,?,?,?)',
-                       (key, name, json.dumps(perms, ensure_ascii=False),
-                        json.dumps(fp, ensure_ascii=False), scope))
-        db.commit()
+
+
 
 
 seed_roles()
 
 
-def backfill_role_perms():
-    """新增页面权限时给存量角色补默认值：跟随该角色「投标管理」页的开关，一次性补齐。
-    view.files 跟随 view.manage（能进台账就能进文件存储）；file.admin 跟随 view.audit；
-    report.viewOthers 跟随 view.audit（管理属性权限，默认仅管理层可看他人日报）。"""
-    page_perms = ('view.timeline', 'view.assign', 'view.alerts', 'view.reports',
-                  'view.files', 'view.aiSummary', 'view.bidcrawl')
-    follow = {'file.admin': 'view.audit', 'report.viewOthers': 'view.audit',
-              'ai.generate': 'view.manage', 'ai.confirm': 'bid.edit',
-              'ai.layout': 'view.audit', 'bidcrawl.manage': 'bid.edit'}
-    with lock:
-        changed = False
-        for r in db.execute('SELECT key, perms FROM roles').fetchall():
-            try:
-                perms = json.loads(r['perms'] or '{}')
-            except Exception:
-                perms = {}
-            missing = [k for k in page_perms if k not in perms]
-            for k in follow:
-                if k not in perms:
-                    missing.append(k)
-            if not missing:
-                continue
-            for k in missing:
-                perms[k] = 1 if perms.get(follow.get(k, 'view.manage')) else 0
-            db.execute('UPDATE roles SET perms=? WHERE key=?',
-                       (json.dumps(perms, ensure_ascii=False), r['key']))
-            changed = True
-        if changed:
-            db.commit()
 
 
 backfill_role_perms()
 
 
-def hash_pw(pw):
-    return hashlib.sha256(('yadecai|' + pw).encode('utf-8')).hexdigest()
 
 
-def sync_users():
-    """把 users.json 里的账号同步进库（每次启动执行，改密码重启即生效）。"""
-    if not USERS_PATH.exists():
-        USERS_PATH.write_text(json.dumps({
-            "admin": {"password": "123456", "display_name": "管理员"}
-        }, ensure_ascii=False, indent=2), encoding='utf-8')
-    data = json.loads(USERS_PATH.read_text(encoding='utf-8'))
-    with lock:
-        for name, cfg in data.items():
-            if str(name).startswith('_'):
-                continue
-            db.execute(
-                'INSERT INTO users(username, pass_hash, display_name, is_admin) VALUES(?,?,?,?) '
-                'ON CONFLICT(username) DO UPDATE SET pass_hash=excluded.pass_hash, '
-                'display_name=excluded.display_name, is_admin=excluded.is_admin',
-                (name, hash_pw(cfg.get('password', '')), cfg.get('display_name', name),
-                 1 if cfg.get('is_admin') else 0))
-        db.commit()
 
 
 sync_users()
 
 
-def upsert_file_user(name, password=None, display_name=None, is_admin=None, remove=False):
-    """把页面上的账号变动写回 users.json，重启服务后不丢失。
-
-    文件读-改-写不是 DB 事务，去全局锁后必须用自己的细粒度锁保护，
-    否则并发的用户管理与台账自动建号会互相覆盖整个文件。"""
-    with guard.keyed('users_json'):
-        try:
-            data = json.loads(USERS_PATH.read_text(encoding='utf-8'))
-        except Exception:
-            data = {}
-        if remove:
-            data.pop(name, None)
-        else:
-            cfg = data.get(name) if isinstance(data.get(name), dict) else {}
-            if password:
-                cfg['password'] = password
-            if display_name is not None:
-                cfg['display_name'] = display_name
-            if is_admin is not None:
-                cfg['is_admin'] = bool(is_admin)
-            data[name] = cfg
-        try:
-            USERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-        except Exception:
-            pass
 
 app = FastAPI(title='亚德彩投标台账')
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
@@ -554,191 +179,34 @@ def collect_person_names(rows):
 
 
 # ---------------- 鉴权 ----------------
-def current_user(authorization: str = Header(default='')):
-    token = authorization[7:].strip() if authorization.startswith('Bearer ') else ''
-    if not token:
-        raise HTTPException(401, '未登录')
-    with guard.unlocked():
-        row = db.execute('SELECT username FROM sessions WHERE token=?', (token,)).fetchone()
-    if not row:
-        raise HTTPException(401, '登录已过期，请重新登录')
-    return row['username']
 
 
-def require_admin(username: str = Depends(current_user)):
-    with guard.unlocked():
-        row = db.execute('SELECT is_admin FROM users WHERE username=?', (username,)).fetchone()
-    if not row or not row['is_admin']:
-        raise HTTPException(403, '需要管理员权限')
-    return username
 
 
 # ---------------- 权限计算 ----------------
-def norm_field_perms(raw):
-    """统一字段权限结构为 {字段: {'level','mask'}}，只保留非「可写」项。
-    兼容历史数据：none→hidden、read→readonly、write→writable。"""
-    out = {}
-    for k, v in (raw or {}).items():
-        if k not in FIELD_KEYS:
-            continue
-        if isinstance(v, dict):
-            lv = str(v.get('level') or 'writable')
-            mk = str(v.get('mask') or 'full')
-        else:
-            lv = {'none': 'hidden', 'read': 'readonly', 'write': 'writable'}.get(str(v), str(v))
-            mk = 'full'
-        if lv not in LEVEL_KEYS:
-            continue
-        if lv == 'writable':
-            continue
-        out[k] = {'level': lv, 'mask': mk if mk in MASK_KEYS else 'full'}
-    return out
 
 
-def mask_value(v, pattern):
-    """按脱敏规则生成展示值（后端返回脱敏值，前端不再二次处理）。"""
-    s = '' if v is None else str(v)
-    if not s:
-        return s
-    if pattern == 'phone':
-        return (s[:3] + '****' + s[-4:]) if len(s) >= 8 else '***'
-    if pattern == 'name':
-        return s[0] + '*' * max(1, len(s) - 1)
-    if pattern == 'amount':
-        return (s[0] + '***') if len(s) > 1 else '***'
-    if pattern == 'text':
-        return (s[:2] + '***') if len(s) > 2 else '***'
-    return '***'
 
 
-def field_rule(field_perms, k):
-    return (field_perms or {}).get(k) or {'level': 'writable', 'mask': 'full'}
 
 
-def field_level(field_perms, k):
-    return field_rule(field_perms, k)['level']
 
 
-def perm_of(username):
-    """返回当前用户的有效权限：{'roleKey','roleName','perms','fieldPerms','dataScope'}。
-    管理员全放行、全字段可写；普通用户取所属角色配置，未配置字段默认可写。"""
-    with guard.unlocked():
-        u = db.execute('SELECT username, is_admin, role_key FROM users WHERE username=?',
-                       (username,)).fetchone()
-        if not u:
-            raise HTTPException(401, '账号不存在')
-        if u['is_admin']:
-            return {'roleKey': 'admin', 'roleName': '管理员', 'dataScope': 'ALL',
-                    'perms': {k: True for k in PERM_KEYS}, 'fieldPerms': {}}
-        r = db.execute('SELECT * FROM roles WHERE key=?', (u['role_key'] or 'staff',)).fetchone()
-    if not r:
-        r = {'key': 'staff', 'name': '投标专员', 'perms': '{}', 'field_perms': '{}', 'data_scope': 'ALL'}
-    try:
-        saved = json.loads(r['perms'] or '{}')
-    except Exception:
-        saved = {}
-    try:
-        fp = json.loads(r['field_perms'] or '{}')
-    except Exception:
-        fp = {}
-    perms = {k: bool(saved.get(k)) for k in PERM_KEYS}
-    return {'roleKey': r['key'], 'roleName': r['name'], 'perms': perms,
-            'fieldPerms': norm_field_perms(fp), 'dataScope': (r['data_scope'] or 'ALL')}
 
 
-def need(username, key, msg='无权执行该操作'):
-    if not perm_of(username)['perms'].get(key):
-        raise HTTPException(403, msg)
 
 
-def filter_out(payload, field_perms):
-    """出站：hidden 字段剔除；masked 字段返回脱敏值。"""
-    if not field_perms:
-        return payload
-    out = {}
-    for k, v in payload.items():
-        r = field_rule(field_perms, k)
-        if r['level'] == 'hidden':
-            continue
-        out[k] = mask_value(v, r['mask']) if r['level'] == 'masked' else v
-    return out
 
 
-def old_payload(rid):
-    """读取库中现有 payload；不存在返回 None（用于区分新增/更新）。"""
-    if not rid:
-        return None
-    with guard.unlocked():
-        r = db.execute('SELECT payload FROM rows WHERE rid=?', (rid,)).fetchone()
-    if not r:
-        return None
-    try:
-        return json.loads(r['payload'])
-    except Exception:
-        return {}
 
 
-def guard_in(rid, payload, field_perms):
-    """入站：hidden / readonly / masked 字段不落库，保留旧值。
-    返回 (新payload, 越权明细[(字段, 旧值, 提交值, 档位)])。"""
-    old = old_payload(rid)
-    is_new = old is None
-    # 从旧值出发：前端只提交「可写」字段时，未提交的字段必须保持原值，不能被覆盖丢失
-    out = {} if is_new else dict(old)
-    if not field_perms:
-        out.update(payload)
-        return out, []
-    rejects = []
-    for k, v in payload.items():
-        r = field_rule(field_perms, k)
-        if r['level'] == 'writable':
-            out[k] = v
-            continue
-        sv = '' if v is None else str(v).strip()
-        if is_new:
-            # 新建：隐藏字段有值直接拒绝；只读/脱敏字段静默丢弃，避免整单新增被拦死
-            if r['level'] == 'hidden' and sv:
-                rejects.append((k, '', v, r['level']))
-            continue
-        ov = (old or {}).get(k, '')
-        ovs = '' if ov is None else str(ov).strip()
-        # 脱敏字段回传的是脱敏值，与旧值脱敏后相同视为「未变更」
-        same = sv == ovs or (r['level'] == 'masked' and sv == str(mask_value(ov, r['mask'])).strip())
-        if not same:
-            rejects.append((k, ov, v, r['level']))
-    return out, rejects
 
 
 # ---------------- 审计（字段级留痕，仅追加） ----------------
-FIELD_LABELS = {k: l for k, l, g in FIELD_CATALOG}
 
 
-def audit_write(entries):
-    """写入审计日志（调用方须持有 lock）。
-    entries = [(username, rid, action, field, old, new, allowed)]"""
-    if not entries:
-        return
-    db.executemany(
-        'INSERT INTO audit_log(ts, username, rid, action, field, old_value, new_value, allowed) '
-        'VALUES(?,?,?,?,?,?,?,?)',
-        [(time.time(), u, rid, act, f, '' if ov is None else str(ov),
-          '' if nv is None else str(nv), 1 if ok else 0)
-         for u, rid, act, f, ov, nv, ok in entries])
-    # 只保留最近 5000 条，避免库无限增长
-    db.execute('DELETE FROM audit_log WHERE id NOT IN '
-               '(SELECT id FROM audit_log ORDER BY id DESC LIMIT 5000)')
 
 
-def audit_diff(username, rid, old, new, action='update'):
-    """对比新旧值，仅记录实际变更的字段。"""
-    entries = []
-    for k in FIELD_KEYS:
-        ov = (old or {}).get(k, '')
-        nv = (new or {}).get(k, '')
-        if str(ov or '') == str(nv or ''):
-            continue
-        entries.append((username, rid, action, k, ov, nv, True))
-    return entries
 
 
 def self_names(username):
