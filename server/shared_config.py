@@ -88,6 +88,62 @@ def pg_conf(force=False):
         return dict(conf)
 
 
+_REDIS_DEFAULTS = {'host': '127.0.0.1', 'port': 6379, 'password': '', 'db': 0}
+_REDIS_KEYS = ('host', 'port', 'password', 'db')
+_REDIS_ENV = {'host': 'REDIS_HOST', 'port': 'REDIS_PORT',
+              'password': 'REDIS_PASSWORD', 'db': 'REDIS_DB'}
+
+
+def redis_conf():
+    """返回 redis.Redis(**...) 可直接使用的连接参数。
+
+    与 pg_conf 同源（同一份 config.json），但独立缓存戳，避免互相干扰。
+    config.json 无 redis 段时用内置默认值；REDIS_* 环境变量可临时覆盖。
+    """
+    path = config_path()
+    sec = {}
+    try:
+        if path.is_file():
+            data = json.loads(path.read_text(encoding='utf-8'))
+            if isinstance(data, dict) and isinstance(data.get('redis'), dict):
+                sec = {k: data['redis'][k] for k in _REDIS_KEYS if k in data['redis']}
+    except Exception as e:
+        raise RuntimeError('统一配置文件解析失败（redis 段）：%s（%s）' % (path, e))
+    conf = dict(_REDIS_DEFAULTS)
+    conf.update(sec)
+    for key, env_name in _REDIS_ENV.items():
+        val = os.environ.get(env_name)
+        if val is not None and str(val).strip():
+            conf[key] = val
+    try:
+        conf['port'] = int(conf['port'])
+        conf['db'] = int(conf['db'])
+    except (TypeError, ValueError):
+        raise RuntimeError('REDIS 端口/db 必须是整数')
+    conf['password'] = str(conf['password'] or '')
+    return conf
+
+
+def lock_backend():
+    """返回锁后端：'local'（进程内，默认）或 'redis'（分布式）。
+
+    优先级：LOCK_BACKEND 环境变量 > config.json 的 lock_backend 段 > 'local'。
+    默认 local 保证阶段 2 改动对现有部署零行为变化；生产多进程时改配置即可。
+    """
+    env = os.environ.get('LOCK_BACKEND', '').strip().lower()
+    if env in ('local', 'redis'):
+        return env
+    try:
+        if config_path().is_file():
+            data = json.loads(config_path().read_text(encoding='utf-8'))
+            v = str((data or {}).get('lock_backend', '')).strip().lower()
+            if v in ('local', 'redis'):
+                return v
+    except Exception:
+        pass
+    return 'local'
+
+
 def pg_password():
     """供日志脱敏使用：从统一配置取密码，而不是从环境变量。"""
     return pg_conf()['password']

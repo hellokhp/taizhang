@@ -172,14 +172,17 @@ class TimedRLock:
     「文件锁 -> 台账锁」的 ABBA 死锁（见方案 §15.2）。
     """
 
-    def __init__(self, timeout=None):
-        self._r = threading.RLock()
+    def __init__(self, name='global', timeout=None):
+        # 阶段 2：底层实现按 LOCK_BACKEND 切换（local=进程内 / redis=跨进程可重入）。
+        # 接口与语义不变，上层数千行 `with lock:` 代码零改动。
+        from .common.dlock import make_lock
+        self._r = make_lock(name, timeout=timeout)
         self.timeout = float(timeout if timeout is not None
                              else os.environ.get('LOCK_WAIT_SECONDS', '3'))
 
     def __enter__(self):
-        if not self._r.acquire(timeout=self.timeout):
-            raise HTTPException(503, '系统繁忙：等待资源超过 %gs，请稍后重试' % self.timeout)
+        # 两种后端都在 acquire 内部处理超时并抛 503，行为与原实现一致。
+        self._r.acquire()
         return self
 
     def __exit__(self, *exc):
@@ -203,12 +206,20 @@ def keyed(name):
 
     慢写（导入 / 清空）用它而不是全局锁，就不会在持锁期间挡住登录、看板、
     文件与 AI 的所有请求；同类慢写之间仍然串行。
+
+    阶段 2：redis 后端下改用跨进程锁（key=taizhang:keyed:<name>），local 后端
+    仍用进程内 RLock 字典，行为与阶段 1 完全一致。
     """
-    with _keyed_guard:
-        lk = _keyed_locks.get(name)
-        if lk is None:
-            lk = threading.RLock()
-            _keyed_locks[name] = lk
+    from .common.config import lock_backend
+    if lock_backend() == 'redis':
+        from .common.dlock import RedisRLock
+        lk = RedisRLock('keyed:' + name)
+    else:
+        with _keyed_guard:
+            lk = _keyed_locks.get(name)
+            if lk is None:
+                lk = threading.RLock()
+                _keyed_locks[name] = lk
     lk.acquire()
     try:
         yield

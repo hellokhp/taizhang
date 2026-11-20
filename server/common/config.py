@@ -10,7 +10,9 @@ shared_config 读取，保持"唯一事实源"。这里只做转发，让新拆�
 """
 from ..shared_config import (  # noqa: F401
     config_path,
+    lock_backend,
     pg_conf,
     pg_password,
     pg_summary,
+    redis_conf,
 )
