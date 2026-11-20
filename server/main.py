@@ -17,7 +17,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -108,6 +108,12 @@ app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], all
 
 # 平台卡死治理 第 1 步：慢请求日志。后 add 的中间件在外层，可覆盖 CORS 处理耗时。
 app.add_middleware(guard.TimingMiddleware)
+
+# ---- 阶段 3：按域拆分的路由组（逻辑边界；将来拆进程时整组移出即可）----
+# 通用域：认证 / 用户 / 角色 / 权限目录 / 日报 —— 公司系统共享能力
+common_router = APIRouter()
+# 台账域：投标台账业务 —— 本模块专属
+taizhang_router = APIRouter()
 
 STRIP_KEYS = {'_updatedBy', '_updatedAt'}
 
@@ -269,7 +275,7 @@ def user_out(r, perms=None):
 
 
 # ---------------- 接口 ----------------
-@app.post('/api/login')
+@common_router.post('/login')
 def login(body: LoginIn):
     with lock:
         u = db.execute('SELECT * FROM users WHERE username=?', (body.username,)).fetchone()
@@ -282,7 +288,7 @@ def login(body: LoginIn):
     return {'token': token, 'user': user_out(u, perm_of(u['username']))}
 
 
-@app.get('/api/me')
+@common_router.get('/me')
 def me(username: str = Depends(current_user)):
     with guard.unlocked():
         u = db.execute('SELECT * FROM users WHERE username=?', (username,)).fetchone()
@@ -291,7 +297,7 @@ def me(username: str = Depends(current_user)):
     return {'user': user_out(u, perm_of(username))}
 
 
-@app.post('/api/me/password')
+@common_router.post('/me/password')
 def change_my_password(body: PwdIn, authorization: str = Header(default=''),
                        username: str = Depends(current_user)):
     """个人中心：自助重置密码。校验旧密码 → 更新 → 注销其它登录会话（保留当前）。"""
@@ -325,7 +331,7 @@ def change_my_password(body: PwdIn, authorization: str = Header(default=''),
     return {'ok': True}
 
 
-@app.get('/api/perm/catalog')
+@common_router.get('/perm/catalog')
 def perm_catalog(username: str = Depends(current_user)):
     """权限矩阵编辑用的目录：模块/操作 + 台账字段。新增模块只需后端 PERM_CATALOG 加一行。"""
     return {
@@ -353,7 +359,7 @@ def role_out(r):
             'dataScope': (r['data_scope'] if 'data_scope' in r.keys() else None) or 'ALL'}
 
 
-@app.get('/api/roles')
+@common_router.get('/roles')
 def list_roles(admin: str = Depends(require_admin)):
     with guard.unlocked():
         rows = db.execute('SELECT * FROM roles ORDER BY is_system DESC, key').fetchall()
@@ -368,7 +374,7 @@ def _clean_scope(v):
     return v if v in [s[0] for s in SCOPES] else 'ALL'
 
 
-@app.post('/api/roles')
+@common_router.post('/roles')
 def create_role(body: RoleIn, admin: str = Depends(require_admin)):
     key = body.key.strip()
     if not key:
@@ -388,7 +394,7 @@ def create_role(body: RoleIn, admin: str = Depends(require_admin)):
     return {'role': role_out(row)}
 
 
-@app.put('/api/roles/{key}')
+@common_router.put('/roles/{key}')
 def update_role(key: str, body: RoleIn, admin: str = Depends(require_admin)):
     with lock:
         row = db.execute('SELECT * FROM roles WHERE key=?', (key,)).fetchone()
@@ -404,7 +410,7 @@ def update_role(key: str, body: RoleIn, admin: str = Depends(require_admin)):
     return {'role': role_out(row)}
 
 
-@app.delete('/api/roles/{key}')
+@common_router.delete('/roles/{key}')
 def delete_role(key: str, admin: str = Depends(require_admin)):
     with lock:
         row = db.execute('SELECT * FROM roles WHERE key=?', (key,)).fetchone()
@@ -425,14 +431,14 @@ def admin_count():
     return db.execute('SELECT COUNT(*) c FROM users WHERE is_admin=1').fetchone()['c']
 
 
-@app.get('/api/users')
+@common_router.get('/users')
 def list_users(admin: str = Depends(require_admin)):
     with guard.unlocked():
         rows = db.execute('SELECT * FROM users ORDER BY is_admin DESC, username').fetchall()
     return {'users': [user_out(r) for r in rows]}
 
 
-@app.get('/api/staff')
+@common_router.get('/staff')
 def staff_list(q: str = '', username: str = Depends(current_user)):
     """非管理员用户名单（用于负责人筛选与标书负责人/协作人/审核人选择），q 模糊匹配账号或显示名。"""
     kw = '%' + q.strip().lower() + '%'
@@ -459,7 +465,7 @@ def _is_admin(username):
     return bool(r and r['is_admin'])
 
 
-@app.get('/api/reports')
+@common_router.get('/reports')
 def reports_list(user: str = '', ym: str = '', username: str = Depends(current_user)):
     """某人某年/某月的工作日报（view.reports 页面权限；user 缺省 = 自己）。
     ym 传 '2026' 取整年、'2026-11' 取当月，缺省取全部。
@@ -485,7 +491,7 @@ def reports_list(user: str = '', ym: str = '', username: str = Depends(current_u
                          'plan': r['plan'] or '', 'updatedAt': r['updated_at']} for r in rows]}
 
 
-@app.put('/api/reports')
+@common_router.put('/reports')
 def report_save(body: ReportIn, username: str = Depends(current_user)):
     """填写/修改某天的工作日报；只能写自己的（管理员可代写），且不允许写未来日期。"""
     need(username, 'view.reports', '无工作日报权限')
@@ -507,7 +513,7 @@ def report_save(body: ReportIn, username: str = Depends(current_user)):
     return {'ok': True, 'rdate': body.rdate}
 
 
-@app.post('/api/users')
+@common_router.post('/users')
 def create_user(body: UserIn, admin: str = Depends(require_admin)):
     name = body.username.strip()
     if not name:
@@ -530,7 +536,7 @@ def create_user(body: UserIn, admin: str = Depends(require_admin)):
     return {'ok': True}
 
 
-@app.put('/api/users/{name}')
+@common_router.put('/users/{name}')
 def update_user(name: str, body: UserIn, admin: str = Depends(require_admin)):
     with lock:
         row = db.execute('SELECT * FROM users WHERE username=?', (name,)).fetchone()
@@ -556,7 +562,7 @@ def update_user(name: str, body: UserIn, admin: str = Depends(require_admin)):
     return {'ok': True}
 
 
-@app.delete('/api/users/{name}')
+@common_router.delete('/users/{name}')
 def delete_user(name: str, admin: str = Depends(require_admin)):
     if name == admin:
         raise HTTPException(400, '不能删除当前登录的账号')
@@ -573,7 +579,7 @@ def delete_user(name: str, admin: str = Depends(require_admin)):
     return {'ok': True}
 
 
-@app.get('/api/bootstrap')
+@taizhang_router.get('/bootstrap')
 def bootstrap(username: str = Depends(current_user)):
     p = perm_of(username)
     fp = p['fieldPerms']
@@ -738,7 +744,7 @@ def ensure_bid_dir(rid, payload, who):
             'bidFiles': files_under(subs['bid'])}
 
 
-@app.put('/api/rows/{rid}')
+@taizhang_router.put('/rows/{rid}')
 def upsert_row(rid: str, body: dict, username: str = Depends(current_user)):
     p = perm_of(username)
     need(username, 'bid.edit', '无台账新增/编辑权限')
@@ -873,7 +879,7 @@ def enroll_project(username: str, project: dict, overwrite: bool = False) -> dic
             'message': '已加入投标管理' if not hit else '已用最新解析结果更新'}
 
 
-@app.delete('/api/rows/{rid}')
+@taizhang_router.delete('/rows/{rid}')
 def delete_row(rid: str, username: str = Depends(current_user)):
     p = perm_of(username)
     need(username, 'bid.delete', '无台账删除权限')
@@ -892,7 +898,7 @@ def delete_row(rid: str, username: str = Depends(current_user)):
     return {'ok': True, 'ts': ts}
 
 
-@app.get('/api/bid-dir')
+@taizhang_router.get('/bid-dir')
 def bid_dir(rid: str = '', username: str = Depends(current_user)):
     """投标项目对应的文件目录（bidfile/开标年/开标月/项目名/招标文件｜标书）：
     不存在则按规则创建，返回两个子目录的节点 id、路径与文件数（供台账上传使用）。"""
@@ -917,7 +923,7 @@ def bid_dir(rid: str = '', username: str = Depends(current_user)):
     return info
 
 
-@app.get('/api/bid-files')
+@taizhang_router.get('/bid-files')
 def bid_files(username: str = Depends(current_user)):
     """各标段「标书」目录下的文件数（rid → 文件数），供「需要处理」判断标书是否已上传。
     未建过项目目录的标段不返回（前端按 0 处理）；按当前用户数据范围过滤。"""
@@ -951,7 +957,7 @@ def bid_files(username: str = Depends(current_user)):
     return {'files': files, 'ts': time.time()}
 
 
-@app.post('/api/clear')
+@taizhang_router.post('/clear')
 @guard.heavy('台账清空', cap=1)
 def clear_all(username: str = Depends(current_user)):
     p = perm_of(username)
@@ -972,7 +978,7 @@ def clear_all(username: str = Depends(current_user)):
     return {'ok': True, 'ts': ts, 'deleted': len(ids)}
 
 
-@app.post('/api/merge')
+@taizhang_router.post('/merge')
 @guard.heavy('台账导入', cap=1)
 def merge(body: MergeIn, username: str = Depends(current_user)):
     """导入合并：与前端 mergeRows 同逻辑（按 rowKey 去重，覆盖时只补非空字段）。
@@ -1046,7 +1052,7 @@ def merge(body: MergeIn, username: str = Depends(current_user)):
             'created_users': created_users}
 
 
-@app.get('/api/changes')
+@taizhang_router.get('/changes')
 def changes(since: float = 0.0, username: str = Depends(current_user)):
     """增量同步：返回 since（服务器时间戳）之后的变更与删除（按当前用户字段权限过滤）。"""
     p = perm_of(username)
@@ -1063,7 +1069,7 @@ def changes(since: float = 0.0, username: str = Depends(current_user)):
     return {'changed': changed, 'deleted': deleted, 'ts': time.time()}
 
 
-@app.get('/api/audit')
+@taizhang_router.get('/audit')
 def list_audit(limit: int = 100, rid: str = '', username: str = Depends(current_user)):
     """字段级审计日志（需「审计日志」模块权限；管理员默认拥有）。"""
     if not perm_of(username)['perms'].get('view.audit'):
@@ -1121,6 +1127,18 @@ app.include_router(bidcrawl_api_mod.build_router(current_user, {
 # 只有被授予 view.schedule / schedule.* 的角色才能查看与增删改。
 app.include_router(bidcrawl_api_mod.build_schedule_router(current_user, {
     'need': need}))
+
+
+# ---------------- 阶段 3：域路由挂载（新路径为主 + 旧路径兼容）----------------
+# 每个域路由定义时用了相对 path（如 '/login'），这里挂两个前缀：
+#   /api/common/*    通用能力：认证/用户/角色/权限/日报（公司系统可共享）
+#   /api/taizhang/*  台账业务：投标台账专属
+# 同时保留 /api/* 旧前缀，前端可渐进迁移，外部历史调用不失效。
+# 必须在 SPA 兜底 /{full_path:path} 之前注册。
+app.include_router(common_router, prefix='/api/common')
+app.include_router(taizhang_router, prefix='/api/taizhang')
+app.include_router(common_router, prefix='/api')          # 旧路径兼容
+app.include_router(taizhang_router, prefix='/api')        # 旧路径兼容
 
 
 # 前端静态托管（frontend/dist，Vite 构建产物）+ SPA history 路由回退：

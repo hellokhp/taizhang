@@ -6,6 +6,51 @@ try{ _token = localStorage.getItem('wb_token') || ''; }catch(e){}
 
 let _on401 = null;
 
+/* ================================================================
+   阶段 3：API 路径域重组映射（渐进迁移开关）
+
+   后端已把路由重组为：
+     /api/common/*     通用能力（认证/用户/角色/权限/日报）
+     /api/taizhang/*   台账业务
+   同时保留旧 /api/* 前缀兼容。
+
+   默认 USE_DOMAIN_PATHS = false：前端仍走旧路径，零风险。
+   待前端准备就绪后改为 true，所有 api()/apiRaw() 调用会自动重写到新路径，
+   业务组件无需逐个修改。映射按「最长前缀优先」匹配，避免 /api/me 误命中 /api/me/password。
+   ================================================================ */
+const USE_DOMAIN_PATHS = false;
+
+const DOMAIN_PREFIXES = [
+  // 台账业务专属
+  ['/api/bootstrap', '/api/taizhang'],
+  ['/api/rows',      '/api/taizhang'],
+  ['/api/changes',   '/api/taizhang'],
+  ['/api/merge',     '/api/taizhang'],
+  ['/api/clear',     '/api/taizhang'],
+  ['/api/audit',     '/api/taizhang'],
+  ['/api/bid-dir',   '/api/taizhang'],
+  ['/api/bid-files', '/api/taizhang'],
+  // 通用能力
+  ['/api/login',       '/api/common'],
+  ['/api/me',          '/api/common'],
+  ['/api/perm/catalog','/api/common'],
+  ['/api/users',       '/api/common'],
+  ['/api/roles',       '/api/common'],
+  ['/api/staff',       '/api/common'],
+  ['/api/reports',     '/api/common'],
+  // fs / ai-summary / bidcrawl 保持原路径，不映射
+];
+
+export function rewritePath(path){
+  if(!USE_DOMAIN_PATHS) return path;
+  for(const [oldP, newP] of DOMAIN_PREFIXES){
+    if(path === oldP || path.startsWith(oldP + '/') || path.startsWith(oldP + '?')){
+      return newP + path.slice(oldP.length);
+    }
+  }
+  return path;
+}
+
 export function getToken(){ return _token; }
 
 export function setToken(t){
@@ -17,6 +62,7 @@ export function onUnauthorized(fn){ _on401 = fn; }
 
 export async function api(path, opts){
   opts = opts || {};
+  path = rewritePath(path);
   const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
   if(_token) headers['Authorization'] = 'Bearer ' + _token;
   let resp;
@@ -39,6 +85,7 @@ export async function api(path, opts){
 /* 原始响应：上传分片（裸流 body）、下载 Blob、导出 CSV 等不走 JSON 的场景 */
 export async function apiRaw(path, opts){
   opts = opts || {};
+  path = rewritePath(path);
   const headers = Object.assign({}, opts.headers || {});
   if(_token) headers['Authorization'] = 'Bearer ' + _token;
   let resp;
