@@ -1,10 +1,19 @@
 {
-  "_comment": "PostgreSQL 唯一配置源模板：复制为同目录 config.json 并填写真实值。config.json 已被 .gitignore 忽略。改数据库只需改这一个文件，改完重启后端 / AI Worker / 标讯采集 Worker。",
+  "_comment": "PostgreSQL + Redis 唯一配置源模板：复制为同目录 config.json 并填写真实值。config.json 已被 .gitignore 忽略。改数据库/Redis 只改这一个文件，改完重启后端 / AI Worker / 标讯采集 Worker。",
   "postgres": {
     "host": "127.0.0.1",
     "port": 5432,
     "user": "postgres",
     "password": "CHANGE_ME",
     "dbname": "yadecai"
-  }
+  },
+  "redis": {
+    "host": "127.0.0.1",
+    "port": 6379,
+    "password": "",
+    "db": 0,
+    "_note": "仅 lock_backend=redis 时用于分布式锁；现场 Redis 5.0 需 redis-py 强制 RESP2（代码已处理）。password 留空表示无密码。锁 key 前缀 taizhang:lock: 与其他用途天然隔离，可与 AI Worker 共用实例。"
+  },
+  "lock_backend": "local",
+  "_lock_backend_note": "全局锁后端：local=进程内锁（默认，配合 --workers 1）；redis=跨进程分布式锁（切换后可用 --workers N 多进程）。环境变量 LOCK_BACKEND 优先级更高。切换前见 deploy/DEPLOY.md §2.3。"
 }

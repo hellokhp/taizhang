@@ -17,10 +17,13 @@
 ```
 /opt/taizhang/
 ├── server/
-│   ├── main.py            # 后端主进程（Python 3.8 venv）
+│   ├── main.py            # 后端主进程（组装各域 router + 初始化子应用）
+│   ├── common/            # 共享内核：config/database/guard/dlock/security/audit 等（阶段 1-2 抽取）
 │   ├── ai_schema.sql      # 全库 DDL 唯一事实源（后端 + AI Worker 共同执行，必须随代码发布）
 │   ├── ai_worker/         # 开标汇总 AI Worker（独立 Python >=3.10 venv）
+│   ├── config.json        # PG + Redis 唯一配置源（由 config.example.json 复制，已 gitignore）
 │   └── users.json         # 账号清单（启动时同步进 PG；只读取，不原地更新）
+├── scripts/               # 冒烟与压测脚本（smoke_test / test_dlock / test_multiprocess_lock）
 ├── frontend/dist/         # 前端构建产物
 └── deploy/
     ├── taizhang.conf      # Supervisor 配置 + 末尾 Nginx 参考配置
@@ -55,9 +58,13 @@ python3 -m venv /opt/taizhang/venv
 python3.10 -m venv /opt/taizhang/ai-venv
 /opt/taizhang/ai-venv/bin/pip install -r /opt/taizhang/server/ai_worker/requirements.txt
 
-# --- Redis（可选，仅作 AI 实时进度信号）---
-# 未安装或未就绪时 Worker 自动降级为 3 秒轮询，不会启动失败；
-# 生产须设置 requirepass + bind 127.0.0.1 + 独立 db，并在 REDIS_URL 中带密码。
+# --- Redis（两用途，注意区分）---
+# 1) AI 实时进度信号：Worker 未就绪时自动降级为 3 秒轮询，不会启动失败；
+#    用 REDIS_URL 配置，可与下面共用实例。
+# 2) 全局分布式锁（阶段 2 新增）：当 config.json 的 lock_backend=redis 时，
+#    后端用它做跨进程互斥（替代进程内 RLock），从而支持 --workers N 多进程。
+#    连接参数在 server/config.json 的 redis 段（唯一事实源），锁 key 前缀 taizhang:lock: 与其他用途隔离。
+# 现场若为 Redis 5.0，代码已强制 RESP2；生产建议 requirepass + bind 127.0.0.1。
 
 # --- Node（仅构建前端需要；也可本地构建后只上传 dist）---
 node -v   # 需 18+
@@ -257,11 +264,23 @@ supervisorctl update
 supervisorctl status        # taizhang 与 taizhang-ai-worker 都应显示 RUNNING
 ```
 
-后端监听 `127.0.0.1:8000`，**当前必须单进程（`--workers 1`）**。
+后端监听 `127.0.0.1:8000`。**锁后端决定能否多进程**（阶段 2 起）：
 
-> 原因不是数据库（PG 完全支持并发），而是 `server/main.py` 仍有进程内全局 `RLock`
-> （`fs.py`、`ai_summary_api.py` 共用同一把）。多 worker 会让这把锁失效并导致并发写冲突。
-> 待《平台卡死治理与故障隔离方案 v2.0》§6.1 移除全局锁后，方可启用多 worker 或按域拆进程（§7）。
+| lock_backend | 锁实现 | --workers | 适用 |
+|---|---|---|---|
+| `local`（默认） | 进程内 RLock | 只能 1 | 当前默认形态，行为与旧版一致 |
+| `redis` | Redis 可重入分布式锁 | 可 2+ | 需要并发/故障隔离时切换 |
+
+**切换到多进程步骤**：
+1. 确认 Redis 可用（本机 6379 或远程），填好 `server/config.json` 的 `redis` 段；
+2. 把同文件的 `lock_backend` 改为 `"redis"`（或用环境变量 `LOCK_BACKEND=redis` 覆盖，优先级更高）；
+3. 把 `deploy/taizhang.conf` 中 `[program:taizhang]` 的 `--workers 1` 改为 N；
+4. `supervisorctl reread && update && restart taizhang`；
+5. 验证 `curl /healthz` 返回 `"lock_backend":"redis","redis":"ok"`。
+
+> 会话存 PG `sessions` 表，多进程天然共享，不会掉登录。全局锁切 Redis 后跨进程互斥有效
+> （已用 4 进程并发写压测验证：160/160 无丢失；local 后端同场景仅 44/160）。
+> 未切换前请保持 `--workers 1`。
 
 ### 2.4 开标汇总 AI Worker（独立进程）
 
@@ -304,7 +323,9 @@ nginx -t && systemctl reload nginx
    读写超时 600s；否则整包先落盘，分片失效且易超时。
 3. **请求体上限**：`client_max_body_size 32m`（分片 16MB 的 2 倍余量，小于分片会 413）。
 4. **SPA 兜底**：`location / { try_files $uri $uri/ /index.html; }`（刷新直达不 404）。
-5. **健康检查**：`GET /healthz`（免登录，返回进程 / PG 连通 / 任务积压），DB 异常返回 503；
+5. **健康检查**：`GET /healthz`（免登录，返回进程 / PG 连通 / 任务积压 / 锁后端与 Redis 状态）。
+   返回字段 `lock_backend`（local/redis）、`redis`（ok/unused/error）；当 `lock_backend=redis`
+   且 Redis 不可达时，`ok=false` 并返回 503。DB 异常同样返回 503。
    SSE 与上传不要用普通 API 的 60s 超时。
 
 > 平台卡死治理第 1 步**已落地**：普通 `/api/` 60s；`/api/fs/upload/` 与仍是同步执行的
@@ -343,8 +364,9 @@ curl -I http://taizhang.internal              # 200 + index.html
 > 慢请求超过 1 秒会在 `app.log` 打 `SLOW` WARN；阈值可用 `SLOW_REQUEST_MS` 调整。
 > 重活并发上限默认 2（导入/清空为 1），可用 `HEAVY_CONCURRENCY` 调整，超出返回 429 而不是排队。
 > 全局锁等待上限默认 3 秒（`LOCK_WAIT_SECONDS`），超时返回 **503 而不是全站无限排队**；
-> 纯读接口已不参与全局互斥。**这三个参数都依赖进程内状态，`--workers 1` 不能放开**：
-> 多进程后各进程各持一把锁，会产生重复数据（见方案 §15.6）。
+> 纯读接口已不参与全局互斥。全局锁本身在 `lock_backend=redis` 时跨进程互斥有效，
+> 支持多 worker；但 `HEAVY_CONCURRENCY` 的并发闸门仍是进程内计数（多 worker 时为每进程 N 个，
+> 属限流语义，不要求跨进程精确）。切换多进程详见 §2.3。
 
 ---
 

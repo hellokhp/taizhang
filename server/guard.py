@@ -142,10 +142,23 @@ def heavy(name, cap=None):
 
 # ---------------- 3. 健康检查数据 ----------------
 def health_payload(db):
-    """返回进程 / PG / 任务积压状态；单项异常只体现在字段里，不抛给调用方。"""
+    """返回进程 / PG / 任务积压 / 锁后端状态；单项异常只体现在字段里，不抛给调用方。
+
+    阶段 4：新增 lock_backend 与 redis 字段，便于监控确认当前用的是本地锁还是
+    分布式锁。降级规则：
+      - backend=local：Redis 不可达只记录到 redis 字段，不影响 ok（本地锁不依赖它）
+      - backend=redis：Redis 不可达 → ok=False（分布式锁失效，真正的故障，应返回 503）
+    """
     with _state_lock:
         out = {'ok': True, 'pid': os.getpid(), 'ts': time.time(),
                'db': 'unknown', 'ai_queue': None, 'heavy': dict(_inflight)}
+    try:
+        from .common.config import lock_backend
+        backend = lock_backend()
+    except Exception:
+        backend = 'unknown'
+    out['lock_backend'] = backend
+
     try:
         r = db.execute('SELECT 1 AS ok').fetchone()
         out['db'] = 'ok' if r else 'unknown'
@@ -159,6 +172,17 @@ def health_payload(db):
     except Exception:
         # AI 表尚未建好也视为进程健康，冷启动由 ai_schema.sql 自检负责
         out['ai_queue'] = None
+
+    # Redis 状态：local 后端下仅作信息展示；redis 后端下是其可用性即系统可用性
+    out['redis'] = 'unused'
+    if backend == 'redis':
+        try:
+            from .common.dlock import _get_redis
+            _get_redis().ping()
+            out['redis'] = 'ok'
+        except Exception as e:
+            out['redis'] = 'error: %s' % str(e)[:120]
+            out['ok'] = False
     return out
 
 

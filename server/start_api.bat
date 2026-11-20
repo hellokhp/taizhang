@@ -6,6 +6,12 @@ echo ==========================================
 echo  Yadecai Bid Ledger API  -  http://127.0.0.1:8000
 echo  First run: pip install -r server\requirements.txt
 echo ==========================================
+rem ---- 锁后端（阶段 2/4）：默认 local 单进程，行为与旧版一致。 ----
+rem 要用 Redis 分布式锁 + 多进程，二选一：
+rem   1) 改 server\config.json 的 "lock_backend": "redis"
+rem   2) 或在此 set "LOCK_BACKEND=redis"（环境变量优先级更高）
+rem 然后下面 --workers 改成 2 或更多。切换前确认 config.json 的 redis 段可用。
+rem set "LOCK_BACKEND=redis"
 rem ---- ONLYOFFICE online preview/edit (optional; delete this block if unused) ----
 rem OFFICE_SERVER   : browser-reachable DS address
 rem OFFICE_SECRET   : MUST equal the DS container JWT_SECRET
