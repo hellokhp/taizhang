@@ -5,10 +5,10 @@
    ================================================================ */
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../api/client'
-import { toast } from '../stores/bid'
-import { can } from '../stores/perm'
-import { useTableLayout } from '../lib/useTableLayout'
+import { api } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
+import { can } from '@/stores/common/perm'
+import { useTableLayout } from '@/lib/useTableLayout'
 
 const router = useRouter()
 

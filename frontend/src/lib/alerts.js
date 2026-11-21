@@ -3,8 +3,8 @@
    看板「需要处理」面板 与 「需要处理」详情页 共用，避免两处口径漂移。
    权限不在这里判断，由调用方按字段四档传入 bid / bond / perf 三个开关。
    ================================================================ */
-import { dd, num } from './format'
-import { isNoBid, bondState, bondKind, shortType, bidStatusOf } from './fields'
+import { dd, num } from '@/lib/format'
+import { isNoBid, bondState, bondKind, shortType, bidStatusOf } from '@/lib/fields'
 
 /* 事项类型：lv = 排序等级（1 提醒 / 2 紧急 / 3 关注），sev = 视觉与统计等级（缺省同 lv）。
    标书未准备 lv 保持 1（列表中紧跟「即将开标」，不改变现有顺序），但 sev=2 → 红色、计入「紧急」。 */

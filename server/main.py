@@ -1133,12 +1133,19 @@ app.include_router(bidcrawl_api_mod.build_schedule_router(current_user, {
 # 每个域路由定义时用了相对 path（如 '/login'），这里挂两个前缀：
 #   /api/common/*    通用能力：认证/用户/角色/权限/日报（公司系统可共享）
 #   /api/taizhang/*  台账业务：投标台账专属
+#   /api/finance/*   财务业务（server/finance/，新增域照此模式）
 # 同时保留 /api/* 旧前缀，前端可渐进迁移，外部历史调用不失效。
 # 必须在 SPA 兜底 /{full_path:path} 之前注册。
 app.include_router(common_router, prefix='/api/common')
 app.include_router(taizhang_router, prefix='/api/taizhang')
 app.include_router(common_router, prefix='/api')          # 旧路径兼容
 app.include_router(taizhang_router, prefix='/api')        # 旧路径兼容
+
+# 财务域（新业务模块参照）：建表幂等 + 双前缀挂载。
+from .finance import api as finance_api                              # noqa: E402
+finance_api.init_tables(db)
+app.include_router(finance_api.finance_router, prefix='/api/finance')
+app.include_router(finance_api.finance_router, prefix='/api')        # 旧路径兼容
 
 
 # 前端静态托管（frontend/dist，Vite 构建产物）+ SPA history 路由回退：

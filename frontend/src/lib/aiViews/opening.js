@@ -5,8 +5,8 @@
 import {
   fmtMoney, fmtPct, fmtNum, fmtSigned, fmtScore, deviationPct,
   scoreCell, assertBaseline,
-} from './currency.js'
-import { openingPairs, summarizePairs } from './dimensions.js'
+} from '@/lib/aiViews/currency.js'
+import { openingPairs, summarizePairs } from '@/lib/aiViews/dimensions.js'
 
 const CALIBER_BY_BEHAVIOR = {
   ratio: 'score.opening.ratio.v1',

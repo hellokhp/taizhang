@@ -4,8 +4,8 @@
    - 保存完全由 DS → 后端回调完成（旧版本自动备份、生成新版本），前端不参与；
    - 关闭时 emit changed 让父组件刷新列表（版本号/大小可能已变化）。 */
 import { ref, watch, nextTick, onUnmounted } from 'vue'
-import { api } from '../../api/client'
-import { toast } from '../../stores/bid'
+import { api } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

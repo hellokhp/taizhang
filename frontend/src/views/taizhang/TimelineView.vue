@@ -7,9 +7,9 @@
    ================================================================ */
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ST, recMonth, openDetail, leadOpts, methodOpts } from '../stores/bid'
-import { RESULT_OPTS } from '../lib/fields'
-import { canSee, isMasked, can } from '../stores/perm'
+import { ST, recMonth, openDetail, leadOpts, methodOpts } from '@/stores/taizhang/bid'
+import { RESULT_OPTS } from '@/lib/fields'
+import { canSee, isMasked, can } from '@/stores/common/perm'
 
 /* 本页独立筛选项（不占用投标管理页的 ST.f，两页互不影响） */
 const f = reactive({kw:'', lead:'', result:'', method:''});

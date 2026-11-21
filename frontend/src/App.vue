@@ -1,21 +1,21 @@
 <script setup>
 import { onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import NavTabs from './components/NavTabs.vue'
-import logo from './assets/images/logo.png'
-import EditDialog from './components/EditDialog.vue'
-import DetailDialog from './components/DetailDialog.vue'
-import ImportDialog from './components/ImportDialog.vue'
-import BidUploadDialog from './components/BidUploadDialog.vue'
-import ToastBox from './components/ToastBox.vue'
-import UploadDock from './components/fs/UploadDock.vue'
-import LoginView from './views/LoginView.vue'
-import { dlg, imp, boot } from './stores/bid'
-import { auth, logout } from './stores/auth'
-import { um } from './stores/users'
+import NavTabs from '@/components/NavTabs.vue'
+import logo from '@/assets/images/logo.png'
+import EditDialog from '@/components/EditDialog.vue'
+import DetailDialog from '@/components/DetailDialog.vue'
+import ImportDialog from '@/components/ImportDialog.vue'
+import BidUploadDialog from '@/components/BidUploadDialog.vue'
+import ToastBox from '@/components/ToastBox.vue'
+import UploadDock from '@/components/fs/UploadDock.vue'
+import LoginView from '@/views/common/LoginView.vue'
+import { dlg, imp, boot } from '@/stores/taizhang/bid'
+import { auth, logout } from '@/stores/common/auth'
+import { um } from '@/stores/common/users'
 
 const route = useRoute();
-const pageTitle = computed(() => ({'/':'首页看板','/manage':'投标管理','/timeline':'标源总览','/assign':'项目分配表','/alerts':'需要处理','/files':'文件存储','/ai-summary':'开标汇总','/bidcrawl':'标讯采集','/users':'用户管理','/roles':'角色权限','/audit':'审计日志','/reports':'工作日报','/profile':'个人中心'}[route.path] || ''));
+const pageTitle = computed(() => ({'/':'首页看板','/manage':'投标管理','/finance':'财务管理','/timeline':'标源总览','/assign':'项目分配表','/alerts':'需要处理','/files':'文件存储','/ai-summary':'开标汇总','/bidcrawl':'标讯采集','/users':'用户管理','/roles':'角色权限','/audit':'审计日志','/reports':'工作日报','/profile':'个人中心'}[route.path] || ''));
 
 function onKey(e){
   if(e.key === 'Escape'){

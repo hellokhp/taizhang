@@ -9,9 +9,9 @@
    注意：本模块只做「比例计算」，价格分绝不在这里重算。
    ================================================================ */
 
-import { ratioPair, crossCheck, DIM, round } from './currency.js'
+import { ratioPair, crossCheck, DIM, round } from '@/lib/aiViews/currency.js'
 
-export { DIM, ratioPair, crossCheck, dimText, sameDim } from './currency.js'
+export { DIM, ratioPair, crossCheck, dimText, sameDim } from '@/lib/aiViews/currency.js'
 
 /** 税口径：AI 工具已在 sheetquote._choose_price_basis() 统一，展示只读取；未标注则返回 unknown */
 export function taxOf(priceBasis) {

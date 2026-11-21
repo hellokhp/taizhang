@@ -1,10 +1,10 @@
 <script setup>
 import { reactive, ref, computed, watch, onUnmounted } from 'vue'
-import { ST, dlg, closeDlg, upsertRow, removeRow, toast, getDraft, setDraft, clearDraft, staff, openBidUpload, upDlg, filesState } from '../stores/bid'
-import { S0, FORM_ITEMS, bidStatusLocked, stampBidStatus } from '../lib/fields'
-import { can, canSee, canWrite, fieldMode } from '../stores/perm'
-import { auth } from '../stores/auth'
-import { api } from '../api/client'
+import { ST, dlg, closeDlg, upsertRow, removeRow, toast, getDraft, setDraft, clearDraft, staff, openBidUpload, upDlg, filesState } from '@/stores/taizhang/bid'
+import { S0, FORM_ITEMS, bidStatusLocked, stampBidStatus } from '@/lib/fields'
+import { can, canSee, canWrite, fieldMode } from '@/stores/common/perm'
+import { auth } from '@/stores/common/auth'
+import { api } from '@/api/client'
 
 const canEdit = computed(() => can('bid.edit'));
 const canDel = computed(() => can('bid.delete'));

@@ -3,10 +3,10 @@
    kind = tender（招标文件，默认）/ bid（标书文件）
    目录规则：bidfile / 开标年 / 开标月 / 项目名 / 招标文件｜标书（后端 GET /api/bid-dir 解析并补建） */
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { api } from '../api/client'
-import { upDlg, closeBidUpload, loadBidFiles, toast } from '../stores/bid'
-import { UploadQueue } from '../lib/fsUploader'
-import UploadQueuePanel from './fs/UploadQueue.vue'
+import { api } from '@/api/client'
+import { upDlg, closeBidUpload, loadBidFiles, toast } from '@/stores/taizhang/bid'
+import { UploadQueue } from '@/lib/fsUploader'
+import UploadQueuePanel from '@/components/fs/UploadQueue.vue'
 
 const META = {
   tender: {

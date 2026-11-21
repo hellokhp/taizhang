@@ -2,7 +2,7 @@
    看板 → 标源总览 的跳转参数
    单月：y + m（到月并展开该月）；整年：仅 y；其他区间：取结束月所属年
    ================================================================ */
-import { ST } from '../stores/bid'
+import { ST } from '@/stores/taizhang/bid'
 
 export function timelineQuery(extra){
   const a = String(ST.ymFrom || '');

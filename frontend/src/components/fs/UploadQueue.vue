@@ -5,7 +5,7 @@
    队列实例是模块级单例，页面切走后上传仍在后台继续，因此卸载时必须解绑回调。
    ================================================================ */
 import { computed, onUnmounted, ref } from 'vue'
-import { humanSize } from '../../lib/fsPerm'
+import { humanSize } from '@/lib/fsPerm'
 
 const props = defineProps({ queue: { type: Object, required: true } });
 const emit = defineEmits(['done']);

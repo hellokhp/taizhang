@@ -1,9 +1,9 @@
 <script setup>
 import { computed, watch, onUnmounted } from 'vue'
-import { ST, detailDlg, closeDetail } from '../stores/bid'
-import { F, bondState, shortType, bidEffortDays } from '../lib/fields'
-import { fmtN, num } from '../lib/format'
-import { canSee, isMasked } from '../stores/perm'
+import { ST, detailDlg, closeDetail } from '@/stores/taizhang/bid'
+import { F, bondState, shortType, bidEffortDays } from '@/lib/fields'
+import { fmtN, num } from '@/lib/format'
+import { canSee, isMasked } from '@/stores/common/perm'
 
 /* 详情数据来自 ST.rows（唯一数据源），轮询更新后弹窗内同步刷新
    两侧统一转字符串比较：后端 rid 为文本，导入/本地缓存的历史数据可能是数字 */

@@ -3,22 +3,23 @@
    各页面对应后端「模块权限」，无权限自动回首页
    ================================================================ */
 import { createRouter, createWebHistory } from 'vue-router'
-import DashboardView from '../views/DashboardView.vue'
-import ManageView from '../views/ManageView.vue'
-import TimelineView from '../views/TimelineView.vue'
-import AssignView from '../views/AssignView.vue'
-import HandleView from '../views/HandleView.vue'
-import ReportsView from '../views/ReportsView.vue'
-import FilesView from '../views/FilesView.vue'
-import AiSummaryView from '../views/AiSummaryView.vue'
-import BidCrawlView from '../views/BidCrawlView.vue'
-import UserManageView from '../views/UserManageView.vue'
-import RoleManageView from '../views/RoleManageView.vue'
-import AuditView from '../views/AuditView.vue'
-import ProfileView from '../views/ProfileView.vue'
-import { auth } from '../stores/auth'
-import { boot } from '../stores/bid'
-import { can } from '../stores/perm'
+import DashboardView from '@/views/taizhang/DashboardView.vue'
+import ManageView from '@/views/taizhang/ManageView.vue'
+import TimelineView from '@/views/taizhang/TimelineView.vue'
+import AssignView from '@/views/taizhang/AssignView.vue'
+import HandleView from '@/views/taizhang/HandleView.vue'
+import ReportsView from '@/views/taizhang/ReportsView.vue'
+import FilesView from '@/views/fs/FilesView.vue'
+import AiSummaryView from '@/views/ai/AiSummaryView.vue'
+import BidCrawlView from '@/views/bidcrawl/BidCrawlView.vue'
+import UserManageView from '@/views/common/UserManageView.vue'
+import RoleManageView from '@/views/common/RoleManageView.vue'
+import AuditView from '@/views/taizhang/AuditView.vue'
+import ProfileView from '@/views/taizhang/ProfileView.vue'
+import FinanceView from '@/views/caiwu/FinanceView.vue'
+import { auth } from '@/stores/common/auth'
+import { boot } from '@/stores/taizhang/bid'
+import { can } from '@/stores/common/perm'
 
 const routes = [
   { path: '/', name: 'dash', component: DashboardView, meta: { perm: 'view.dashboard' } },
@@ -34,6 +35,7 @@ const routes = [
   { path: '/roles', name: 'roles', component: RoleManageView, meta: { perm: 'view.roles' } },
   { path: '/audit', name: 'audit', component: AuditView, meta: { perm: 'view.audit' } },
   { path: '/profile', name: 'profile', component: ProfileView },   // 登录即可访问，不需模块权限
+  { path: '/finance', name: 'finance', component: FinanceView, meta: { perm: 'view.finance' } },  // 财务域
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ];
 

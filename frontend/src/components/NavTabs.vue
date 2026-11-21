@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ST, bidFiles, filesState } from '../stores/bid'
-import { buildAlerts } from '../lib/alerts'
-import { can, canAgg } from '../stores/perm'
+import { ST, bidFiles, filesState } from '@/stores/taizhang/bid'
+import { buildAlerts } from '@/lib/alerts'
+import { can, canAgg } from '@/stores/common/perm'
 
 const route = useRoute();
 const router = useRouter();
@@ -30,6 +30,10 @@ const pendingCnt = computed(() => buildAlerts(ST.rows, {
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="2.6" width="12" height="10.8" rx="1.6"/><path d="M2 6h12M6 6v7.4"/></svg>
       投标管理
       <span class="badge">{{ ST.rows.length }}</span>
+    </button>
+    <button v-if="can('view.finance')" :class="{on: route.path === '/finance'}" @click="router.push('/finance')">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.4h12M2 8h12M2 11.6h12"/><circle cx="5.2" cy="4.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="10.8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="6.6" cy="11.6" r="1.1" fill="currentColor" stroke="none"/></svg>
+      财务管理
     </button>
     <button v-if="can('view.timeline')" :class="{on: route.path === '/timeline'}" @click="router.push('/timeline')">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx="1.6"/><path d="M2 6.4h12M5.4 1.6v2.8M10.6 1.6v2.8"/></svg>

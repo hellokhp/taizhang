@@ -1,9 +1,9 @@
 <script setup>
 /* 原子化权限：按用户 / 按角色，对某个目录或文件授予 5 个独立动作（+ 是否向下继承） */
 import { ref, watch } from 'vue'
-import { api } from '../../api/client'
-import { toast } from '../../stores/bid'
-import { FS_OPS, fsPermText, tsText } from '../../lib/fsPerm'
+import { api } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
+import { FS_OPS, fsPermText, tsText } from '@/lib/fsPerm'
 
 const props = defineProps({ open: { type: Boolean, default: false }, nodeId: { type: String, default: '' },
                             nodeName: { type: String, default: '' }, path: { type: String, default: '' } });

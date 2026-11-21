@@ -1,7 +1,7 @@
 <script setup>
 /* 左侧目录树：懒加载展开，扁平结构 + 缩进，避免递归组件 */
 import { onMounted, ref } from 'vue'
-import { api } from '../../api/client'
+import { api } from '@/api/client'
 
 const props = defineProps({ current: { type: String, default: '' } });
 const emit = defineEmits(['open']);

@@ -4,8 +4,8 @@
 import {
   fmtMoney, fmtNum, fmtPct, fmtSigned, fmtScore, round,
   deviationPct, scoreCell, assertBaseline,
-} from './currency.js'
-import { discountPairs, summarizePairs } from './dimensions.js'
+} from '@/lib/aiViews/currency.js'
+import { discountPairs, summarizePairs } from '@/lib/aiViews/dimensions.js'
 
 const CALIBER = {
   deduct: 'score.deduct.v1',

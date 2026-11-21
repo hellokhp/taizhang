@@ -5,10 +5,10 @@
    与独立 CLI 生成的 Excel 对齐：规则 + 排名 + 产品清单 + 规则原文
    ================================================================ */
 import { ref, computed } from 'vue'
-import { AI } from '../stores/aiSummary'
+import { AI } from '@/stores/ai/aiSummary'
 import {
   parseDiscount, fmtMoney, fmtNum, fmtPct, fmtSigned, fmtScore,
-} from '../lib/aiDiscount'
+} from '@/lib/aiDiscount'
 
 const vm = computed(() => parseDiscount(AI.summary))
 const showRule = ref(true)

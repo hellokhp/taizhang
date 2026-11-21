@@ -2,7 +2,7 @@
    台账表格列目录 + 列配置默认值与归一化
    列 key 优先复用字段 key；project / time / amount 为组合列。
    ================================================================ */
-import { F } from './fields'
+import { F } from '@/lib/fields'
 
 /* 默认展示的 8 列（与原有表格一致） */
 const BASE = [

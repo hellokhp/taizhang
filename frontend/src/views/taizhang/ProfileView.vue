@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { api } from '../api/client'
-import { auth } from '../stores/auth'
-import { can } from '../stores/perm'
-import { toast } from '../stores/bid'
+import { api } from '@/api/client'
+import { auth } from '@/stores/common/auth'
+import { can } from '@/stores/common/perm'
+import { toast } from '@/stores/taizhang/bid'
 
 /* ============ 基础 ============ */
 const YEAR = new Date().getFullYear();

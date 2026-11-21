@@ -1,10 +1,10 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { S, toast } from '../stores/bid'
-import { fmtMoney } from '../lib/format'
-import { canAgg, can } from '../stores/perm'
-import { FUND_META, fundAllow, fundStat, fundCats } from '../lib/fund'
+import { S, toast } from '@/stores/taizhang/bid'
+import { fmtMoney } from '@/lib/format'
+import { canAgg, can } from '@/stores/common/perm'
+import { FUND_META, fundAllow, fundStat, fundCats } from '@/lib/fund'
 
 /* ============ 数据：本期 / 全部 两套口径 ============ */
 const allow = computed(() => fundAllow(canAgg));

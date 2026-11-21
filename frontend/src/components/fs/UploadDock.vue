@@ -7,8 +7,8 @@
    · 不绑定任何页面/弹窗生命周期：切页、关窗，任务与进度都在
    ================================================================ */
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { LIVE, liveTasks } from '../../lib/fsUploader'
-import { humanSize } from '../../lib/fsPerm'
+import { LIVE, liveTasks } from '@/lib/fsUploader'
+import { humanSize } from '@/lib/fsPerm'
 
 const POS_KEY = 'wb_upload_dock_pos';
 const W = 340, H_EST = 240;

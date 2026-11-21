@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { AI, aiCols, evOf, levelOf, reviewRows, reviewCount, editCell } from '../stores/aiSummary'
-import { colsWithWidth, fmtCell } from '../lib/aiSummaryCols'
+import { AI, aiCols, evOf, levelOf, reviewRows, reviewCount, editCell } from '@/stores/ai/aiSummary'
+import { colsWithWidth, fmtCell } from '@/lib/aiSummaryCols'
 
 const props = defineProps({ hideEmpty: { type: Boolean, default: true } })
 const showAll = ref(false)

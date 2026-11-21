@@ -1,9 +1,9 @@
 <script setup>
 /* 版本/备份抽屉：覆盖、修改、删除都会留下旧版本，默认保留 7 天（可在设置里改） */
 import { ref, watch } from 'vue'
-import { api } from '../../api/client'
-import { toast } from '../../stores/bid'
-import { humanSize, tsText } from '../../lib/fsPerm'
+import { api } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
+import { humanSize, tsText } from '@/lib/fsPerm'
 
 const props = defineProps({ open: { type: Boolean, default: false }, nodeId: { type: String, default: '' },
                             nodeName: { type: String, default: '' }, canOverwrite: { type: Boolean, default: false } });

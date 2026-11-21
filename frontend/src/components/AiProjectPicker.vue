@@ -4,7 +4,7 @@
    - 组件只负责：防抖输入、分页加载、键盘导航、高亮渲染
    - v-model 绑定 rid；「未建招标文件目录」的项目仍可选（保留原语义，只是提示） */
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { AI, loadProjects, setSelectedProject } from '../stores/aiSummary'
+import { AI, loadProjects, setSelectedProject } from '@/stores/ai/aiSummary'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },

@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { ST, recMonth } from '../stores/bid'
-import { TODAY, fmtYM, ymMonths, ymLabel } from '../lib/format'
-import { isNoBid } from '../lib/fields'
+import { ST, recMonth } from '@/stores/taizhang/bid'
+import { TODAY, fmtYM, ymMonths, ymLabel } from '@/lib/format'
+import { isNoBid } from '@/lib/fields'
 
 /* ============ 数据：绘制统计区间内的每个月 ============ */
 const ms = computed(() => ymMonths(ST.ymFrom, ST.ymTo));

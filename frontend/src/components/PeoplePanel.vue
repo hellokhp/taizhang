@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { S } from '../stores/bid'
-import { can } from '../stores/perm'
-import { timelineQuery } from '../lib/jump'
+import { S } from '@/stores/taizhang/bid'
+import { can } from '@/stores/common/perm'
+import { timelineQuery } from '@/lib/jump'
 
 /* 点人名 → 标源总览，带上当前区间与「负责人 = 该人」筛选 */
 const router = useRouter();

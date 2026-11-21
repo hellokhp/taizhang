@@ -187,7 +187,7 @@ def backfill_role_perms():
     view.files 跟随 view.manage（能进台账就能进文件存储）；file.admin 跟随 view.audit；
     report.viewOthers 跟随 view.audit（管理属性权限，默认仅管理层可看他人日报）。"""
     page_perms = ('view.timeline', 'view.assign', 'view.alerts', 'view.reports',
-                  'view.files', 'view.aiSummary', 'view.bidcrawl')
+                  'view.files', 'view.aiSummary', 'view.bidcrawl', 'view.finance')
     follow = {'file.admin': 'view.audit', 'report.viewOthers': 'view.audit',
               'ai.generate': 'view.manage', 'ai.confirm': 'bid.edit',
               'ai.layout': 'view.audit', 'bidcrawl.manage': 'bid.edit'}

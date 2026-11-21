@@ -3,13 +3,13 @@
    ================================================================ */
 import { reactive, computed, watch } from 'vue'
 import * as XLSX from 'xlsx'
-import { TODAY, pad, fmtYM, parseD, ymOf, yOf, dd, num, uid } from '../lib/format'
-import { F, METHOD_OPTS, S0, SAMPLE, rowsFromMatrix, rowKey, cleanRow, isNoBid, isDecided, bondState, bondKind, stampBidStatus, bidEffortDays } from '../lib/fields'
-import { defaultTableCfg, normalizeTableCfg, clampWidth, clampRowH } from '../lib/tableCols'
-import { isoToday, rowInFund } from '../lib/fund'
-import { api } from '../api/client'
-import { auth } from './auth'
-import { canWrite } from './perm'
+import { TODAY, pad, fmtYM, parseD, ymOf, yOf, dd, num, uid } from '@/lib/format'
+import { F, METHOD_OPTS, S0, SAMPLE, rowsFromMatrix, rowKey, cleanRow, isNoBid, isDecided, bondState, bondKind, stampBidStatus, bidEffortDays } from '@/lib/fields'
+import { defaultTableCfg, normalizeTableCfg, clampWidth, clampRowH } from '@/lib/tableCols'
+import { isoToday, rowInFund } from '@/lib/fund'
+import { api } from '@/api/client'
+import { auth } from '@/stores/common/auth'
+import { canWrite } from '@/stores/common/perm'
 
 /* ==================== 全局状态 ==================== */
 const KEY = 'workbuddy_bid_dash_v1';

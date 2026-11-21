@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { api } from '../api/client'
-import { auth } from '../stores/auth'
-import { staff, loadStaff, toast } from '../stores/bid'
-import { can } from '../stores/perm'
+import { api } from '@/api/client'
+import { auth } from '@/stores/common/auth'
+import { staff, loadStaff, toast } from '@/stores/taizhang/bid'
+import { can } from '@/stores/common/perm'
 
 /* ============ 基础 ============ */
 const TODAY = new Date();

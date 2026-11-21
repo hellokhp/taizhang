@@ -1,5 +1,5 @@
 <script setup>
-import { imp, impStat, confirmImport } from '../stores/bid'
+import { imp, impStat, confirmImport } from '@/stores/taizhang/bid'
 </script>
 
 <template>

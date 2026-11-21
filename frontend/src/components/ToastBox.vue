@@ -1,5 +1,5 @@
 <script setup>
-import { toastBox } from '../stores/bid'
+import { toastBox } from '@/stores/taizhang/bid'
 </script>
 
 <template>

@@ -1,9 +1,9 @@
 <script setup>
 /* 存储操作日志：成功与被拒绝的动作都记录，可筛选、导出 CSV */
 import { ref, watch } from 'vue'
-import { api, apiBlob } from '../../api/client'
-import { toast } from '../../stores/bid'
-import { humanSize, tsText } from '../../lib/fsPerm'
+import { api, apiBlob } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
+import { humanSize, tsText } from '@/lib/fsPerm'
 
 const props = defineProps({ open: { type: Boolean, default: false } });
 const emit = defineEmits(['close']);

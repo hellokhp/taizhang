@@ -6,11 +6,11 @@
    columns: [{ key,label,sub,dtype,formatter,group,locked,caliberKey,permGroup }]
    rows:    [{ bidderId, name, cells:{ key:{value,display,evidence,level,formulaRef,pair,reason} } }]
 */
-import { assertBaseline } from './currency.js'
-import discount from './discount.js'
-import shortlist from './shortlist.js'
-import opening from './opening.js'
-import bidderFolder from './bidderFolder.js'
+import { assertBaseline } from '@/lib/aiViews/currency.js'
+import discount from '@/lib/aiViews/discount.js'
+import shortlist from '@/lib/aiViews/shortlist.js'
+import opening from '@/lib/aiViews/opening.js'
+import bidderFolder from '@/lib/aiViews/bidderFolder.js'
 
 const ADAPTERS = [discount, shortlist, opening, bidderFolder]
 

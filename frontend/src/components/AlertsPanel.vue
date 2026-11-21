@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ST, bidFiles, filesState } from '../stores/bid'
-import { buildAlerts, sevOf } from '../lib/alerts'
-import { can, canAgg } from '../stores/perm'
+import { ST, bidFiles, filesState } from '@/stores/taizhang/bid'
+import { buildAlerts, sevOf } from '@/lib/alerts'
+import { can, canAgg } from '@/stores/common/perm'
 
 const router = useRouter();
 

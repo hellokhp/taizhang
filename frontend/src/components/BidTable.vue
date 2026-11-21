@@ -1,10 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount } from 'vue'
-import { ST, pagedRows, toggleSort, openEdit, openDetail, openBidUpload, removeRow, toggleSel, isSelected, selPageAll, setColWidth } from '../stores/bid'
-import { num, fmtN, dd } from '../lib/format'
-import { bondState, shortType, bidStatusOf, bidEffortDays } from '../lib/fields'
-import { TABLE_MAP } from '../lib/tableCols'
-import { can, canSee, isMasked } from '../stores/perm'
+import { ST, pagedRows, toggleSort, openEdit, openDetail, openBidUpload, removeRow, toggleSel, isSelected, selPageAll, setColWidth } from '@/stores/taizhang/bid'
+import { num, fmtN, dd } from '@/lib/format'
+import { bondState, shortType, bidStatusOf, bidEffortDays } from '@/lib/fields'
+import { TABLE_MAP } from '@/lib/tableCols'
+import { can, canSee, isMasked } from '@/stores/common/perm'
 
 const props = defineProps({ readonly: {type:Boolean, default:false} });
 

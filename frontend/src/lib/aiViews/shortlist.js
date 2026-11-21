@@ -3,8 +3,8 @@
    折扣率按「单商品类汇总报价 ÷ 单商品类汇总最高限价」逐类同维度配对。 */
 import {
   fmtMoney, fmtPct, fmtNum, fmtScore, round, scoreCell, assertBaseline,
-} from './currency.js'
-import { shortlistPairs, summarizePairs, taxOf } from './dimensions.js'
+} from '@/lib/aiViews/currency.js'
+import { shortlistPairs, summarizePairs, taxOf } from '@/lib/aiViews/dimensions.js'
 
 const CALIBER = {
   aggregate: 'score.shortlist.aggregate.v1',

@@ -1,8 +1,8 @@
 <script setup>
 /* 存储设置：备份保留天数等「口子」，改完立即生效（可选择同步应用到已有版本） */
 import { ref, watch } from 'vue'
-import { api } from '../../api/client'
-import { toast } from '../../stores/bid'
+import { api } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
 
 const props = defineProps({ open: { type: Boolean, default: false } });
 const emit = defineEmits(['close']);

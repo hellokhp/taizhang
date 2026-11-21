@@ -5,9 +5,9 @@
    - ⓘ 面板展示「值 + 公式/计分口径 + 同维度配对 + 原文证据」
 */
 import { ref, computed } from 'vue'
-import { AI, resultVm, visibleColumns, saveLayoutPref } from '../stores/aiSummary'
-import { adapt as adaptView } from '../lib/aiViews/index.js'
-import { dimText } from '../lib/aiViews/currency'
+import { AI, resultVm, visibleColumns, saveLayoutPref } from '@/stores/ai/aiSummary'
+import { adapt as adaptView } from '@/lib/aiViews/index.js'
+import { dimText } from '@/lib/aiViews/currency'
 
 const props = defineProps({ vm: { type: Object, default: null } })
 

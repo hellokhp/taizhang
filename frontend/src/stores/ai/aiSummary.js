@@ -6,10 +6,10 @@
    ================================================================ */
 import { reactive, computed } from 'vue'
 import * as XLSX from 'xlsx'
-import { api, getToken } from '../api/client'
-import { toast } from './bid'
-import { parseDiscount } from '../lib/aiDiscount'
-import { adapt as adaptView } from '../lib/aiViews/index.js'
+import { api, getToken } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
+import { parseDiscount } from '@/lib/aiDiscount'
+import { adapt as adaptView } from '@/lib/aiViews/index.js'
 
 export const AI = reactive({
   projects: [],              // 当前已加载的项目页（搜索重置、滚动累加）

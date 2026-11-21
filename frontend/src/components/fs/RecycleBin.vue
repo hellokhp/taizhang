@@ -1,9 +1,9 @@
 <script setup>
 /* 回收站：删除的节点保留 N 天；支持勾选多项批量恢复 / 批量彻底删除 */
 import { ref, computed, watch, nextTick } from 'vue'
-import { api } from '../../api/client'
-import { toast } from '../../stores/bid'
-import { humanSize, tsText } from '../../lib/fsPerm'
+import { api } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
+import { humanSize, tsText } from '@/lib/fsPerm'
 
 const props = defineProps({ open: { type: Boolean, default: false } });
 const emit = defineEmits(['close', 'changed']);

@@ -1,8 +1,8 @@
 <script setup>
 import { computed, reactive, watch } from 'vue'
-import { ST, cfgDlg, saveTableCfg, applyTableCfg, deleteTableCfg, toast } from '../stores/bid'
-import { TABLE_COLS, DEFAULT_WIDTHS, defaultTableCfg, clampRowH, MIN_ROW_H, MAX_ROW_H } from '../lib/tableCols'
-import { canSee } from '../stores/perm'
+import { ST, cfgDlg, saveTableCfg, applyTableCfg, deleteTableCfg, toast } from '@/stores/taizhang/bid'
+import { TABLE_COLS, DEFAULT_WIDTHS, defaultTableCfg, clampRowH, MIN_ROW_H, MAX_ROW_H } from '@/lib/tableCols'
+import { canSee } from '@/stores/common/perm'
 
 const TIME_L = computed(() => ST.basis === 'deadline' ? '交标时间' : '开标时间');
 

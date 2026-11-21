@@ -1,6 +1,6 @@
 /* 模式 A · 按投标人文件夹解析（兜底视图）
    没有开标结果表时也给出排名主表骨架，绝不静默出空表。 */
-import { fmtMoney, fmtScore, scoreCell, assertBaseline } from './currency.js'
+import { fmtMoney, fmtScore, scoreCell, assertBaseline } from '@/lib/aiViews/currency.js'
 
 export function select(raw) {
   return !!(raw?.rows && raw.rows.length && !raw?.lots && !raw?.discount && !raw?.shortlist)

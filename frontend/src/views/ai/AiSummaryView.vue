@@ -1,18 +1,18 @@
 <script setup>
 import { onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../api/client'
-import { toast } from '../stores/bid'
-import { can } from '../stores/perm'
-import AiTaskProgress from '../components/AiTaskProgress.vue'
-import AiSummaryTable from '../components/AiSummaryTable.vue'
-import AiResultTable from '../components/AiResultTable.vue'
-import AiProjectPicker from '../components/AiProjectPicker.vue'
+import { api } from '@/api/client'
+import { toast } from '@/stores/taizhang/bid'
+import { can } from '@/stores/common/perm'
+import AiTaskProgress from '@/components/AiTaskProgress.vue'
+import AiSummaryTable from '@/components/AiSummaryTable.vue'
+import AiResultTable from '@/components/AiResultTable.vue'
+import AiProjectPicker from '@/components/AiProjectPicker.vue'
 import {
   AI, loadProjects, loadTasks, loadSummary, generate, confirm, exportXlsx,
   openTask, dispose, reviewCount, resultVm,
-} from '../stores/aiSummary'
-import { fmtTime, fmtCell } from '../lib/aiSummaryCols'
+} from '@/stores/ai/aiSummary'
+import { fmtTime, fmtCell } from '@/lib/aiSummaryCols'
 
 const router = useRouter()
 const canGen = computed(() => can('ai.generate'))

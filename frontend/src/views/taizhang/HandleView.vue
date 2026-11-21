@@ -1,11 +1,11 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ST, leadOpts, openDetail, openEdit, bidFiles, filesState } from '../stores/bid'
-import { ALERT_TYPES, buildAlerts, countByType, sevOf } from '../lib/alerts'
-import { can, canAgg, canSee } from '../stores/perm'
-import { bondState, bidStatusOf } from '../lib/fields'
-import { dd, num } from '../lib/format'
+import { ST, leadOpts, openDetail, openEdit, bidFiles, filesState } from '@/stores/taizhang/bid'
+import { ALERT_TYPES, buildAlerts, countByType, sevOf } from '@/lib/alerts'
+import { can, canAgg, canSee } from '@/stores/common/perm'
+import { bondState, bidStatusOf } from '@/lib/fields'
+import { dd, num } from '@/lib/format'
 
 const route = useRoute();
 

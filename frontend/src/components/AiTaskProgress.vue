@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
-import { AI, cancelTask } from '../stores/aiSummary'
-import { STAGE_LABEL, fmtTime } from '../lib/aiSummaryCols'
+import { AI, cancelTask } from '@/stores/ai/aiSummary'
+import { STAGE_LABEL, fmtTime } from '@/lib/aiSummaryCols'
 
 const show = computed(() => AI.generating || (AI.task && !['DONE','PARTIAL','FAILED','CANCELED'].includes(AI.task.status)))
 const pct = computed(() => Math.max(0, Math.min(100, Number(AI.task?.progress || 0))))

@@ -8,9 +8,9 @@
    内容随格子大小自动换行，永远收在对应格子里。
    ================================================================ */
 import { ref, reactive, computed, watch } from 'vue'
-import { ST, openDetail, staff, leadOpts } from '../stores/bid'
-import { TODAY, pad } from '../lib/format'
-import { canAgg, canSee } from '../stores/perm'
+import { ST, openDetail, staff, leadOpts } from '@/stores/taizhang/bid'
+import { TODAY, pad } from '@/lib/format'
+import { canAgg, canSee } from '@/stores/common/perm'
 
 const showAll = ref(false);      // 默认从今天起；打开后含更早的历史安排
 const todayISO = TODAY.getFullYear() + '-' + pad(TODAY.getMonth() + 1) + '-' + pad(TODAY.getDate());

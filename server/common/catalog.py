@@ -67,6 +67,8 @@ PERM_CATALOG = [
     ('bid.export', '台账 · 导出/模板', '操作'),
     ('file.admin', '存储 · 全局管理（回收站/备份/日志）', '操作'),
     ('report.viewOthers', '日报 · 查看其他人员数据', '操作'),
+    ('view.finance', '财务管理', '页面'),
+    ('fin.edit', '财务 · 新增/编辑', '操作'),
 ]
 PERM_KEYS = [p[0] for p in PERM_CATALOG]
 

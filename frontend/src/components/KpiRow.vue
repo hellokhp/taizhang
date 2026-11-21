@@ -1,12 +1,12 @@
 <script setup>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ST, S, recMonth } from '../stores/bid'
-import { fmtMoney, ymShift, ymMonths, ymLabel } from '../lib/format'
-import { canAgg, can } from '../stores/perm'
-import { isNoBid } from '../lib/fields'
-import { timelineQuery } from '../lib/jump'
-import { fundAllow, fundStat } from '../lib/fund'
+import { ST, S, recMonth } from '@/stores/taizhang/bid'
+import { fmtMoney, ymShift, ymMonths, ymLabel } from '@/lib/format'
+import { canAgg, can } from '@/stores/common/perm'
+import { isNoBid } from '@/lib/fields'
+import { timelineQuery } from '@/lib/jump'
+import { fundAllow, fundStat } from '@/lib/fund'
 
 /* 数字可点：带着当前统计区间与状态跳到「标源总览」 */
 const router = useRouter();
