@@ -13,7 +13,7 @@ const router = useRouter();
 const canJump = computed(() => can('view.timeline'));
 function jump(extra){
   if(!canJump.value) return;
-  router.push({path:'/timeline', query: timelineQuery(extra)});
+  router.push({path:'/taizhang/timeline', query: timelineQuery(extra)});
 }
 
 /* 资金类字段若为「隐藏 / 脱敏」档，汇总会失真，直接不展示该 KPI */

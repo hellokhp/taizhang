@@ -40,6 +40,8 @@ const DOMAIN_PREFIXES = [
   ['/api/reports',     '/api/common'],
   // 财务业务
   ['/api/finance',     '/api/finance'],   // 已是新路径，保留以免误映射
+  // 管理中心
+  ['/api/admin',       '/api/admin'],     // 已是新路径，保留以免误映射
   // fs / ai-summary / bidcrawl 保持原路径，不映射
 ];
 

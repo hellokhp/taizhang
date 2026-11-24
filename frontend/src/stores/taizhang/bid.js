@@ -3,7 +3,7 @@
    ================================================================ */
 import { reactive, computed, watch } from 'vue'
 import * as XLSX from 'xlsx'
-import { TODAY, pad, fmtYM, parseD, ymOf, yOf, dd, num, uid } from '@/lib/format'
+import { TODAY, pad, fmtYM, parseD, parseDT, ymOf, yOf, dd, num, uid } from '@/lib/format'
 import { F, METHOD_OPTS, S0, SAMPLE, rowsFromMatrix, rowKey, cleanRow, isNoBid, isDecided, bondState, bondKind, stampBidStatus, bidEffortDays } from '@/lib/fields'
 import { defaultTableCfg, normalizeTableCfg, clampWidth, clampRowH } from '@/lib/tableCols'
 import { isoToday, rowInFund } from '@/lib/fund'
@@ -168,8 +168,11 @@ export const scopedRows = computed(() => {
     arr = arr.filter(r => !recMonth(r));
   }else if(from || to){
     arr = arr.filter(r => {
-      const d = rowDate(r);
-      if(!d) return false;                       // 无时间字段的记录不进区间
+      const full = rowDate(r);
+      if(!full) return false;                    // 无时间字段的记录不进区间
+      /* 时间精确到秒后，取 YYYY-MM-DD 日期部分比较；
+         否则 '2026-11-30 17:00:00' 会被当成晚于 '2026-11-30' 而漏掉边界当天 */
+      const d = String(full).slice(0, 10);
       if(from && d < from) return false;
       if(to   && d > to)   return false;
       return true;
@@ -198,7 +201,7 @@ export const scopedRows = computed(() => {
     if(k === 'amount'){ x = a.result === '中标' ? num(a.winAmount)||num(a.ourPrice) : num(a.ourPrice); y = b.result === '中标' ? num(b.winAmount)||num(b.ourPrice) : num(b.ourPrice); }
     if(k === 'bondStatus'){ x = bondState(a); y = bondState(b); }
     if(NUM_SORT.indexOf(k) >= 0) return (num(x) - num(y)) * d;
-    if(DATE_SORT.indexOf(k) >= 0){ x = parseD(x); y = parseD(y); if(!x) return 1; if(!y) return -1; return (x - y) * d; }
+    if(DATE_SORT.indexOf(k) >= 0){ x = parseDT(x); y = parseDT(y); if(!x) return 1; if(!y) return -1; return (x - y) * d; }
     return String(x||'').localeCompare(String(y||''), 'zh') * d;
   });
   return arr;
@@ -213,7 +216,9 @@ export const pagedRows = computed(() => {
 /* 员工名单（服务器上非 admin 用户，用于负责人筛选与标书负责人/协作人/审核人选择） */
 export const staff = reactive({ list: [] });
 export async function loadStaff(){
-  try{ const r = await api('/api/staff'); staff.list = r.staff || []; }catch(e){ /* 静默，回退台账历史人名 */ }
+  /* 标书负责人/协作人/审核人只选投标部员工；历史外部人员由台账历史人名兜底 */
+  try{ const r = await api('/api/staff?dept=bid'); staff.list = r.staff || []; }
+  catch(e){ /* 静默，回退台账历史人名 */ }
 }
 /* 负责人筛选选项：服务器用户名单 ∪ 台账历史人名（兼容外部人员/离职员工） */
 export const leadOpts = computed(() => {
@@ -400,28 +405,37 @@ export async function bootRemote(){
   try{
     const me = await api('/api/me');
     auth.user = me.user;
-    /* 本机缓存若归属其他账号（或旧缓存无归属且当前非管理员）→ 丢弃，避免越权看到字段 */
-    if(cachedOwner ? (cachedOwner !== auth.user.username) : !auth.user.isAdmin){
-      ST.rows = [];
-    }
-    let b = await api('/api/bootstrap');
-    /* 服务器全新而本机有正式台账 → 一键迁移上服务器（仅限从未初始化过的库） */
-    if(b.fresh && !firstRun && ST.rows.length){
-      const payload = ST.rows.map(r => cleanRow(r));
-      await api('/api/merge', {method:'POST', body: JSON.stringify({rows: payload, overwrite: true})});
-      b = await api('/api/bootstrap');
-      if(b.rows.length) toast('已把本机台账迁移到服务器（' + b.rows.length + ' 条）');
-    }
-    ST.rows = b.rows || [];
-    lastSync = b.ts || (Date.now() / 1000);
     auth.needLogin = false;
+    /* 部门准入：无「投标台账」模块权限的用户（财务部/设计部）不加载台账数据、
+       不启动台账同步，避免 /api/bootstrap 返回 403 影响他们进入自己的模块。
+       模块清单随 /api/me 一并返回；管理员或老前端缓存无该字段时按有权限处理。 */
+    const mods = auth.user.modules || ['taizhang'];
+    const hasTaizhang = mods.includes('taizhang');
+    if(hasTaizhang){
+      /* 本机缓存若归属其他账号（或旧缓存无归属且当前非管理员）→ 丢弃，避免越权看到字段 */
+      if(cachedOwner ? (cachedOwner !== auth.user.username) : !auth.user.isAdmin){
+        ST.rows = [];
+      }
+      let b = await api('/api/bootstrap');
+      /* 服务器全新而本机有正式台账 → 一键迁移上服务器（仅限从未初始化过的库） */
+      if(b.fresh && !firstRun && ST.rows.length){
+        const payload = ST.rows.map(r => cleanRow(r));
+        await api('/api/merge', {method:'POST', body: JSON.stringify({rows: payload, overwrite: true})});
+        b = await api('/api/bootstrap');
+        if(b.rows.length) toast('已把本机台账迁移到服务器（' + b.rows.length + ' 条）');
+      }
+      ST.rows = b.rows || [];
+      lastSync = b.ts || (Date.now() / 1000);
+      loadStaff();                        // 员工名单（不阻塞主流程）
+      loadBidFiles(true);                 // 标书文件数（「标书未上传」判定用）
+      startSync();
+    }else{
+      ST.rows = [];                       // 非投标部门不接触台账数据
+    }
   }catch(e){
     if(auth.needLogin) return;          // 凭证失效 → 弹登录框
     toast(e.message + '，暂用本机缓存，恢复后自动同步');
   }
-  loadStaff();                          // 员工名单（不阻塞主流程）
-  loadBidFiles(true);                   // 标书文件数（「标书未上传」判定用）
-  startSync();
 }
 
 /* 记忆化启动：路由守卫与 App 挂载共用同一次 bootRemote */

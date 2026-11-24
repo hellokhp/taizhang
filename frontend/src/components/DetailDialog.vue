@@ -2,7 +2,7 @@
 import { computed, watch, onUnmounted } from 'vue'
 import { ST, detailDlg, closeDetail } from '@/stores/taizhang/bid'
 import { F, bondState, shortType, bidEffortDays } from '@/lib/fields'
-import { fmtN, num } from '@/lib/format'
+import { fmtN, num, fmtDT } from '@/lib/format'
 import { canSee, isMasked } from '@/stores/common/perm'
 
 /* 详情数据来自 ST.rows（唯一数据源），轮询更新后弹窗内同步刷新
@@ -75,6 +75,7 @@ function valueText(f){
   if(f.der) return isMasked(f.k) ? '***' : v + ' 天';
   if(isMasked(f.k)) return String(v);          // 脱敏值由后端返回，前端不再二次处理
   if(f.t === 'num') return num(v) ? fmtN(v) : '—';
+  if(f.t === 'datetime') return fmtDT(v) || String(v);
   return String(v);
 }
 

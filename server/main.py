@@ -35,31 +35,43 @@ from .common.auth_tables import (
     upsert_file_user,
 )
 from .common.catalog import (
+    ALL_SYSTEM,
+    DEPARTMENTS,
+    DEPT_KEYS,
+    DEPT_SYSTEMS,
     FIELD_CATALOG,
     FIELD_KEYS,
     LEVEL_KEYS,
     LEVELS,
     MASK_CATALOG,
     MASK_KEYS,
+    MODULES,
     PERM_CATALOG,
     PERM_KEYS,
     ROLE_SEEDS,
     SCOPES,
+    perm_systems,
+    perms_for_system,
+    system_for_dept,
 )
 from .common.database import BASE, DB_PATH, ROOT, USERS_PATH, PgDB, _conn, db
 from .common.security import (
+    can_module,
     current_user,
+    dept_of,
     filter_out,
     field_level,
     field_rule,
     guard_in,
     hash_pw,
     mask_value,
+    modules_of,
     need,
     norm_field_perms,
     old_payload,
     perm_of,
     require_admin,
+    require_module,
 )
 
 # 全局锁实例现在由 common.guard 持有（全进程唯一）；下方 `with lock:` 与
@@ -74,7 +86,7 @@ lock = _cg.lock
 init_db()
 
 # ---------------- 权限模型 ----------------
-# 台账 48 个字段（与前端 lib/fields.js 的 F 保持一致，用于权限矩阵与字段屏蔽）
+# 台账 51 个字段（与前端 lib/fields.js 的 F 保持一致，用于权限矩阵与字段屏蔽）
 
 # 模块/操作权限（新增功能模块时在这里追加一项即可，前端自动出现勾选项）
 
@@ -242,6 +254,7 @@ class UserIn(BaseModel):
     display_name: str = ''
     is_admin: bool = False
     role_key: str = ''
+    dept: str = ''
 
 
 class PwdIn(BaseModel):
@@ -255,6 +268,7 @@ class RoleIn(BaseModel):
     perms: dict = {}
     field_perms: dict = {}
     data_scope: str = 'ALL'
+    system: str = 'taizhang'
 
 
 class MergeIn(BaseModel):
@@ -262,10 +276,22 @@ class MergeIn(BaseModel):
     overwrite: bool = True
 
 
+def _dept_modules(dept, is_admin):
+    """按部门算可访问模块（纯函数，不查库）；管理员恒全模块。"""
+    key = 'management' if is_admin else (dept if dept in DEPT_KEYS else 'bid')
+    for d in DEPARTMENTS:
+        if d[0] == key:
+            return key, d[1], list(d[2])
+    return key, key, []
+
+
 def user_out(r, perms=None):
     role = 'admin' if r['is_admin'] else (r['role_key'] or 'staff')
+    dept = (r['dept'] if 'dept' in r.keys() else '') if hasattr(r, 'keys') else ''
+    dept_key, dept_name, modules = _dept_modules(dept, bool(r['is_admin']))
     o = {'username': r['username'], 'displayName': r['display_name'] or r['username'],
-         'isAdmin': bool(r['is_admin']), 'roleKey': role}
+         'isAdmin': bool(r['is_admin']), 'roleKey': role,
+         'dept': dept_key, 'deptName': dept_name, 'modules': modules}
     if perms is not None:
         o['perms'] = perms['perms']
         o['fieldPerms'] = perms['fieldPerms']
@@ -331,15 +357,62 @@ def change_my_password(body: PwdIn, authorization: str = Header(default=''),
     return {'ok': True}
 
 
+def visible_systems(username):
+    """当前用户可管理的系统集合：管理部(is_admin/dept=management)可管全部系统，
+    普通用户只能管自己部门归属的系统。用于用户/角色/权限目录的系统隔离。"""
+    with guard.unlocked():
+        r = db.execute('SELECT is_admin, dept FROM users WHERE username=?', (username,)).fetchone()
+    if not r:
+        raise HTTPException(401, '账号不存在')
+    if r['is_admin'] or (r['dept'] if 'dept' in r.keys() else '') == 'management':
+        return set(m[0] for m in MODULES)
+    return {system_for_dept(r['dept'] if 'dept' in r.keys() else 'bid')}
+
+
+def check_manage_system(username, system):
+    """校验请求的系统是否在可管理范围；返回规范化后的系统 key。
+
+    system=ALL_SYSTEM('all') 是管理中心的「全量视图」专用标识：跨越所有系统的
+    用户/角色/权限目录。只有管理部（visible_systems 返回全部模块）可用，
+    普通部门请求 all 会在下面的可见性校验被拒。"""
+    valid = set(m[0] for m in MODULES) | {ALL_SYSTEM}
+    if system not in valid:
+        raise HTTPException(400, '系统标识无效')
+    if system == ALL_SYSTEM:
+        # all 要求「管理部通配」：visible_systems 返回的是全部模块集合
+        if '*' in visible_systems(username) or set(m[0] for m in MODULES).issubset(visible_systems(username)):
+            return system
+        raise HTTPException(403, '仅管理部可查看全量数据')
+    if system not in visible_systems(username):
+        raise HTTPException(403, '无权管理该系统')
+    return system
+
+
 @common_router.get('/perm/catalog')
-def perm_catalog(username: str = Depends(current_user)):
-    """权限矩阵编辑用的目录：模块/操作 + 台账字段。新增模块只需后端 PERM_CATALOG 加一行。"""
+def perm_catalog(system: str = 'taizhang', username: str = Depends(current_user)):
+    """权限矩阵编辑目录，按系统隔离：只返回该系统可见的权限项。
+    台账字段权限仅对 taizhang 系统返回；新增模块只需 PERM_CATALOG/PERM_SYSTEMS 加行。"""
+    system = check_manage_system(username, system)
+    is_all = (system == ALL_SYSTEM)
+    # all 视图返回全集权限项（各系统可见项去重），普通系统只返回该系统可见项
+    if is_all:
+        perms = list(PERM_CATALOG)
+    else:
+        perms = perms_for_system(system)
     return {
-        'perms': [{'key': k, 'label': l, 'group': g} for k, l, g in PERM_CATALOG],
-        'fields': [{'key': k, 'label': l, 'group': g} for k, l, g in FIELD_CATALOG],
+        # systems 字段：权限项归属的系统集合（管理中心据此按系统分类折叠）
+        'perms': [{'key': k, 'label': l, 'group': g, 'systems': list(perm_systems(k))}
+                  for k, l, g in perms],
+        # 字段权限是台账专属：台账系统与 all 全量视图返回，其它系统空数组（前端整块隐藏）
+        'fields': [{'key': k, 'label': l, 'group': g} for k, l, g in FIELD_CATALOG]
+                  if (system == 'taizhang' or is_all) else [],
         'levels': [{'key': k, 'label': l} for k, l in LEVELS],
         'masks': [{'key': k, 'label': l} for k, l in MASK_CATALOG],
         'scopes': [{'key': k, 'label': l} for k, l in SCOPES]
+                  if (system == 'taizhang' or is_all) else [],
+        'departments': [{'key': d[0], 'label': d[1], 'modules': list(d[2])} for d in DEPARTMENTS],
+        'modules': [{'key': m[0], 'label': m[1]} for m in MODULES],
+        'system': system
     }
 
 
@@ -353,21 +426,33 @@ def role_out(r):
         fp = json.loads(r['field_perms'] or '{}')
     except Exception:
         fp = {}
+    rsys = r['system'] if 'system' in r.keys() and r['system'] else 'taizhang'
+    vis = set(p[0] for p in perms_for_system(rsys))
     return {'key': r['key'], 'name': r['name'], 'isSystem': bool(r['is_system']),
-            'perms': {k: bool(perms.get(k)) for k in PERM_KEYS},
-            'fieldPerms': norm_field_perms(fp),
+            'system': rsys,
+            # perms 只回该系统可见的项，避免台账角色看到财务权限残留
+            'perms': {k: bool(perms.get(k)) for k in PERM_KEYS if k in vis},
+            'fieldPerms': norm_field_perms(fp) if rsys == 'taizhang' else {},
             'dataScope': (r['data_scope'] if 'data_scope' in r.keys() else None) or 'ALL'}
 
 
 @common_router.get('/roles')
-def list_roles(admin: str = Depends(require_admin)):
+def list_roles(system: str = 'taizhang', admin: str = Depends(require_admin)):
+    """角色列表按系统过滤：管理部可看全部系统，普通管理员只看本系统。"""
+    check_manage_system(admin, system)
     with guard.unlocked():
-        rows = db.execute('SELECT * FROM roles ORDER BY is_system DESC, key').fetchall()
+        if system == ALL_SYSTEM:
+            rows = db.execute('SELECT * FROM roles ORDER BY system, is_system DESC, key').fetchall()
+        else:
+            rows = db.execute('SELECT * FROM roles WHERE system=? OR system IS NULL OR system=\'\' '
+                              'ORDER BY is_system DESC, key', (system,)).fetchall()
     return {'roles': [role_out(r) for r in rows]}
 
 
-def _clean_perms(d):
-    return {k: 1 if d.get(k) else 0 for k in PERM_KEYS}
+def _clean_perms(d, system='taizhang'):
+    """只保留该系统可见的权限项，防止跨系统权限混入角色。"""
+    vis = set(p[0] for p in perms_for_system(system))
+    return {k: (1 if d.get(k) else 0) for k in PERM_KEYS if k in vis}
 
 
 def _clean_scope(v):
@@ -381,14 +466,18 @@ def create_role(body: RoleIn, admin: str = Depends(require_admin)):
         raise HTTPException(400, '角色标识不能为空')
     if not body.name.strip():
         raise HTTPException(400, '角色名称不能为空')
+    system = check_manage_system(admin, body.system or 'taizhang')
+    if system == ALL_SYSTEM:
+        raise HTTPException(400, '新建角色必须归属具体系统，不能归属「全部」')
     with lock:
         if db.execute('SELECT 1 FROM roles WHERE key=?', (key,)).fetchone():
             raise HTTPException(400, '角色「' + key + '」已存在')
-        db.execute('INSERT INTO roles(key, name, is_system, perms, field_perms, data_scope) '
-                   'VALUES(?,?,0,?,?,?)',
-                   (key, body.name.strip(), json.dumps(_clean_perms(body.perms), ensure_ascii=False),
-                    json.dumps(norm_field_perms(body.field_perms), ensure_ascii=False),
-                    _clean_scope(body.data_scope)))
+        db.execute('INSERT INTO roles(key, name, is_system, perms, field_perms, data_scope, system) '
+                   'VALUES(?,?,0,?,?,?,?)',
+                   (key, body.name.strip(), json.dumps(_clean_perms(body.perms, system), ensure_ascii=False),
+                    json.dumps(norm_field_perms(body.field_perms) if system == 'taizhang' else {},
+                               ensure_ascii=False),
+                    _clean_scope(body.data_scope), system))
         db.commit()
         row = db.execute('SELECT * FROM roles WHERE key=?', (key,)).fetchone()
     return {'role': role_out(row)}
@@ -401,9 +490,13 @@ def update_role(key: str, body: RoleIn, admin: str = Depends(require_admin)):
         if not row:
             raise HTTPException(404, '角色不存在')
         name = body.name.strip() or row['name']
+        # 角色系统归属不可改；按住库的 system 校验可见范围并清洗权限
+        rsys = row['system'] if 'system' in row.keys() and row['system'] else 'taizhang'
+        check_manage_system(admin, rsys)
         db.execute('UPDATE roles SET name=?, perms=?, field_perms=?, data_scope=? WHERE key=?',
-                   (name, json.dumps(_clean_perms(body.perms), ensure_ascii=False),
-                    json.dumps(norm_field_perms(body.field_perms), ensure_ascii=False),
+                   (name, json.dumps(_clean_perms(body.perms, rsys), ensure_ascii=False),
+                    json.dumps(norm_field_perms(body.field_perms) if rsys == 'taizhang' else {},
+                               ensure_ascii=False),
                     _clean_scope(body.data_scope), key))
         db.commit()
         row = db.execute('SELECT * FROM roles WHERE key=?', (key,)).fetchone()
@@ -432,21 +525,49 @@ def admin_count():
 
 
 @common_router.get('/users')
-def list_users(admin: str = Depends(require_admin)):
+def list_users(system: str = 'taizhang', admin: str = Depends(require_admin)):
+    """用户列表按系统隔离：用户按 dept 归属到系统，管理部(is_admin/management)看全部。
+    普通部门管理员只能看到本部门归属系统的用户，看不到其它部门账号。"""
+    check_manage_system(admin, system)
+    # system=all（管理中心）：跨所有系统返回全部用户；否则按 dept 归属过滤单系统。
+    all_sys = (system == ALL_SYSTEM)
     with guard.unlocked():
-        rows = db.execute('SELECT * FROM users ORDER BY is_admin DESC, username').fetchall()
+        if all_sys:
+            rows = db.execute('SELECT * FROM users ORDER BY is_admin DESC, username').fetchall()
+        else:
+            # 非管理部：只看 dept 归属到该系统的用户（含管理部账号？不含——管理部由 all_sys 分支看）
+            rows = db.execute(
+                'SELECT * FROM users WHERE dept=? AND is_admin=0 '
+                'ORDER BY is_admin DESC, username', (dept_of_system(system),)).fetchall()
     return {'users': [user_out(r) for r in rows]}
 
 
+def dept_of_system(system):
+    """系统对应的用户 dept（用户归属系统的反向映射）。"""
+    for dept, sys_key in DEPT_SYSTEMS.items():
+        if sys_key == system:
+            return dept
+    return 'bid'
+
+
 @common_router.get('/staff')
-def staff_list(q: str = '', username: str = Depends(current_user)):
-    """非管理员用户名单（用于负责人筛选与标书负责人/协作人/审核人选择），q 模糊匹配账号或显示名。"""
+def staff_list(q: str = '', dept: str = '', username: str = Depends(current_user)):
+    """非管理员用户名单（用于负责人筛选与标书负责人/协作人/审核人选择）。
+
+    q   模糊匹配账号或显示名；
+    dept 可选部门过滤（如 bid=投标部）。投标台账只应出现投标部员工，
+    不传则保持兼容、返回全部非管理员（其他系统/旧调用方不受影响）。
+    """
     kw = '%' + q.strip().lower() + '%'
+    cond = ['is_admin=0', '(LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?)']
+    args = [kw, kw]
+    if dept.strip():
+        cond.append('dept=?')
+        args.append(dept.strip())
     with guard.unlocked():
         rows = db.execute(
-            'SELECT username, display_name FROM users WHERE is_admin=0 '
-            'AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?) '
-            'ORDER BY display_name, username', (kw, kw)).fetchall()
+            'SELECT username, display_name FROM users WHERE ' + ' AND '.join(cond) +
+            ' ORDER BY display_name, username', tuple(args)).fetchall()
     return {'staff': [{'username': r['username'], 'displayName': r['display_name'] or r['username']}
                       for r in rows]}
 
@@ -526,13 +647,17 @@ def create_user(body: UserIn, admin: str = Depends(require_admin)):
         role_key = body.role_key.strip() or 'staff'
         if not db.execute('SELECT 1 FROM roles WHERE key=?', (role_key,)).fetchone():
             raise HTTPException(400, '角色不存在')
-        db.execute('INSERT INTO users(username, pass_hash, display_name, is_admin, role_key) '
-                   'VALUES(?,?,?,?,?)',
+        dept = 'management' if body.is_admin else (body.dept.strip() or 'bid')
+        if dept not in DEPT_KEYS:
+            raise HTTPException(400, '部门不存在')
+        db.execute('INSERT INTO users(username, pass_hash, display_name, is_admin, role_key, dept) '
+                   'VALUES(?,?,?,?,?,?)',
                    (name, hash_pw(body.password), body.display_name.strip() or name,
-                    1 if body.is_admin else 0, role_key))
+                    1 if body.is_admin else 0, role_key, dept))
         db.commit()
     upsert_file_user(name, password=body.password,
-                     display_name=body.display_name.strip() or name, is_admin=body.is_admin)
+                     display_name=body.display_name.strip() or name, is_admin=body.is_admin,
+                     dept=dept)
     return {'ok': True}
 
 
@@ -548,17 +673,23 @@ def update_user(name: str, body: UserIn, admin: str = Depends(require_admin)):
         role_key = body.role_key.strip() or (row['role_key'] or 'staff')
         if not db.execute('SELECT 1 FROM roles WHERE key=?', (role_key,)).fetchone():
             raise HTTPException(400, '角色不存在')
+        # 管理员恒 management；普通用户取提交值，空则沿用原部门，再空归 bid
+        dept = 'management' if new_admin else (
+            body.dept.strip() or (row['dept'] if 'dept' in row.keys() else '') or 'bid')
+        if dept not in DEPT_KEYS:
+            raise HTTPException(400, '部门不存在')
         if body.password:
-            db.execute('UPDATE users SET pass_hash=?, display_name=?, is_admin=?, role_key=? '
+            db.execute('UPDATE users SET pass_hash=?, display_name=?, is_admin=?, role_key=?, dept=? '
                        'WHERE username=?',
                        (hash_pw(body.password), body.display_name.strip() or name, new_admin,
-                        role_key, name))
+                        role_key, dept, name))
         else:
-            db.execute('UPDATE users SET display_name=?, is_admin=?, role_key=? WHERE username=?',
-                       (body.display_name.strip() or name, new_admin, role_key, name))
+            db.execute('UPDATE users SET display_name=?, is_admin=?, role_key=?, dept=? WHERE username=?',
+                       (body.display_name.strip() or name, new_admin, role_key, dept, name))
         db.commit()
     upsert_file_user(name, password=body.password or None,
-                     display_name=body.display_name.strip() or name, is_admin=body.is_admin)
+                     display_name=body.display_name.strip() or name, is_admin=body.is_admin,
+                     dept=dept)
     return {'ok': True}
 
 
@@ -1097,7 +1228,8 @@ from . import fs_api as fs_api_mod                                     # noqa: E
 
 fs_core.init_fs(db, lock, perm_of)          # 注入依赖 + 创建存储目录 + 启动清理线程
 fs_core.init_tables(db)                     # 幂等建表（老库可直接升级）
-app.include_router(fs_api_mod.build_router(current_user))
+app.include_router(fs_api_mod.build_router(current_user),
+                   dependencies=[Depends(require_module('taizhang'))])
 
 
 # ---------------- 开标汇总 AI（/api/ai-summary/*） ----------------
@@ -1113,7 +1245,7 @@ app.include_router(ai_api_mod.build_router(current_user, {
     'audit_write': audit_write, 'field_level': field_level,
     'mask_value': mask_value, 'fs': fs_core,
     'person_fields': PERSON_FIELDS,
-}))
+}), dependencies=[Depends(require_module('taizhang'))])
 
 
 # ---------------- 标讯采集（/api/bidcrawl/*） ----------------
@@ -1122,11 +1254,12 @@ from . import bidcrawl_api as bidcrawl_api_mod                # noqa: E402
 
 bidcrawl_api_mod.init_tables(db)
 app.include_router(bidcrawl_api_mod.build_router(current_user, {
-    'need': need, 'enroll_project': enroll_project}))
+    'need': need, 'enroll_project': enroll_project}),
+    dependencies=[Depends(require_module('taizhang'))])
 # 定时任务走独立的权限点，不与采集页的 view.bidcrawl 绑定：
 # 只有被授予 view.schedule / schedule.* 的角色才能查看与增删改。
 app.include_router(bidcrawl_api_mod.build_schedule_router(current_user, {
-    'need': need}))
+    'need': need}), dependencies=[Depends(require_module('taizhang'))])
 
 
 # ---------------- 阶段 3：域路由挂载（新路径为主 + 旧路径兼容）----------------
@@ -1137,15 +1270,27 @@ app.include_router(bidcrawl_api_mod.build_schedule_router(current_user, {
 # 同时保留 /api/* 旧前缀，前端可渐进迁移，外部历史调用不失效。
 # 必须在 SPA 兜底 /{full_path:path} 之前注册。
 app.include_router(common_router, prefix='/api/common')
-app.include_router(taizhang_router, prefix='/api/taizhang')
+app.include_router(taizhang_router, prefix='/api/taizhang',
+                   dependencies=[Depends(require_module('taizhang'))])
 app.include_router(common_router, prefix='/api')          # 旧路径兼容
-app.include_router(taizhang_router, prefix='/api')        # 旧路径兼容
+app.include_router(taizhang_router, prefix='/api',        # 旧路径兼容
+                   dependencies=[Depends(require_module('taizhang'))])
 
 # 财务域（新业务模块参照）：建表幂等 + 双前缀挂载。
 from .finance import api as finance_api                              # noqa: E402
 finance_api.init_tables(db)
-app.include_router(finance_api.finance_router, prefix='/api/finance')
-app.include_router(finance_api.finance_router, prefix='/api')        # 旧路径兼容
+app.include_router(finance_api.finance_router, prefix='/api/finance',
+                   dependencies=[Depends(require_module('finance'))])
+app.include_router(finance_api.finance_router, prefix='/api',        # 旧路径兼容
+                   dependencies=[Depends(require_module('finance'))])
+
+# 管理中心域：全局看板，仅管理部可进（require_module('admin') 部门准入）。
+# 用户/角色全量 CRUD 走 common_router 的 system=all，不在此重复实现。
+from .admin_api import admin_router                                  # noqa: E402
+app.include_router(admin_router, prefix='/api/admin',
+                   dependencies=[Depends(require_module('admin'))])
+app.include_router(admin_router, prefix='/api',                       # 旧路径兼容
+                   dependencies=[Depends(require_module('admin'))])
 
 
 # 前端静态托管（frontend/dist，Vite 构建产物）+ SPA history 路由回退：

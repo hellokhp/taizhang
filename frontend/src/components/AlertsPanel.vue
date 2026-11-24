@@ -34,7 +34,7 @@ function clsOf(o){ return {1:'a-info', 2:'a-red', 3:'a-warn'}[sevOf(o)]; }
 /* 点「紧急 / 提醒 / 关注」直接进详情页并按该等级筛选 */
 function goLevel(lv){
   if(!can('view.alerts')) return;
-  router.push('/alerts?lv=' + lv);
+  router.push('/taizhang/alerts?lv=' + lv);
 }
 </script>
 
@@ -56,7 +56,7 @@ function goLevel(lv){
           <i style="background:var(--warn)"></i>关注 <b>{{ lvCount[3] }}</b>
         </button>
         <button v-if="can('view.alerts')" class="as-link" title="打开「需要处理」详情页，可按类型筛选与分页"
-          @click="router.push('/alerts')">全部 ›</button>
+          @click="router.push('/taizhang/alerts')">全部 ›</button>
       </div>
     </div>
     <div class="card-b">

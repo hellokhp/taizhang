@@ -2,6 +2,7 @@
 import { reactive, ref, computed, watch, onUnmounted } from 'vue'
 import { ST, dlg, closeDlg, upsertRow, removeRow, toast, getDraft, setDraft, clearDraft, staff, openBidUpload, upDlg, filesState } from '@/stores/taizhang/bid'
 import { S0, FORM_ITEMS, bidStatusLocked, stampBidStatus } from '@/lib/fields'
+import { toLocalDT, fromLocalDT } from '@/lib/format'
 import { can, canSee, canWrite, fieldMode } from '@/stores/common/perm'
 import { auth } from '@/stores/common/auth'
 import { api } from '@/api/client'
@@ -84,6 +85,10 @@ watch(() => dlg.open, v => {
     Object.assign(draft, S0({}), {method:'公开招标', bondType:'银行转账', bondStatus:'未缴', result:'待开标'}, r || {});
     const st = getDraft(dlg.id);      // 恢复上次未保存的草稿
     if(st) Object.assign(draft, st);
+    /* 存储格式 YYYY-MM-DD HH:mm:ss → datetime-local 控件值；草稿里已是控件值则跳过 */
+    ['deadline', 'openTime'].forEach(k => {
+      if(draft[k] && draft[k].indexOf('T') < 0) draft[k] = toLocalDT(draft[k]);
+    });
     statusPrev = draft.bidStatus || '';
     baseSnap = JSON.stringify(draft);
     confirmLeave.value = false;
@@ -119,6 +124,8 @@ async function saveDlg(){
   confirmLeave.value = false;
   const o = {};
   Object.keys(draft).forEach(k => { o[k] = typeof draft[k] === 'string' ? draft[k].trim() : draft[k]; });
+  /* datetime-local 的 T 分隔转成存库格式 YYYY-MM-DD HH:mm:ss */
+  ['deadline', 'openTime'].forEach(k => { if(o[k]) o[k] = fromLocalDT(o[k]); });
   if(!o.projectName){ toast('请填写项目名称'); return; }
   if(!o.openTime){ toast('请填写开标时间'); return; }
   if(!o.lead){ toast('请填写标书负责人'); return; }
@@ -171,9 +178,16 @@ const updatedInfo = computed(() => {
                   :disabled="it.f.k === 'bidStatus' && statusLocked(o)">{{ o }}</option>
               </select>
               <input v-else-if="it.f.t === 'date'" type="date" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)">
+              <input v-else-if="it.f.t === 'datetime'" type="datetime-local" step="1" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)">
               <input v-else-if="it.f.t === 'num'" type="number" step="0.01" placeholder="0.00" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)">
               <textarea v-else-if="it.f.t2 === 'area'" placeholder="补充说明" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)"></textarea>
-              <input v-else type="text" :placeholder="it.f.l" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)" :list="STAFF_KEYS.indexOf(it.f.k) >= 0 ? 'staffList' : undefined">
+              <!-- 人员字段用真 select：点开即列出全部投标部员工（datalist 会按已填值过滤，只剩自己） -->
+              <select v-else-if="STAFF_KEYS.indexOf(it.f.k) >= 0" v-model="draft[it.f.k]"
+                :disabled="!canWrite(it.f.k) || lockedField(it.f)">
+                <option value="">请选择</option>
+                <option v-for="p in staffOpts" :key="p" :value="p">{{ p }}</option>
+              </select>
+              <input v-else type="text" :placeholder="it.f.l" v-model="draft[it.f.k]" :disabled="!canWrite(it.f.k) || lockedField(it.f)">
               <div v-if="it.f.k === 'bidStatus'" class="fld-tip">
                 {{ isAdmin ? '管理员可任意调整；状态时间点自动记录，也可手动修正。' : '只能向前推进（未开始 → 进行中 → 已结束），回退状态需管理员操作。' }}
               </div>
@@ -239,8 +253,4 @@ const updatedInfo = computed(() => {
       </div>
     </div>
   </div>
-  <!-- 员工名单候选（datalist：可选择也可自由输入，兼容历史数据中的外部人员） -->
-  <datalist id="staffList">
-    <option v-for="p in staffOpts" :key="p" :value="p"></option>
-  </datalist>
 </template>

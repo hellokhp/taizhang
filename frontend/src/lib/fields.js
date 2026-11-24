@@ -1,7 +1,7 @@
 /* ================================================================
-   字段配置（48 字段）、示例数据、导入解析归一化、行级纯函数
+   字段配置（51 字段）、示例数据、导入解析归一化、行级纯函数
    ================================================================ */
-import { pad, parseD } from '@/lib/format'
+import { pad, parseD, normDT } from '@/lib/format'
 
 export const F = [
   {k:'projectName', l:'项目名称',        t:'text',   g:'项目基础', req:1, span:2},
@@ -15,8 +15,11 @@ export const F = [
   {k:'projType',    l:'类型',            t:'select', g:'项目基础', opt:['工程','货物','服务']},
   {k:'industry',    l:'行业',            t:'select', g:'项目基础', opt:['政府机关','医疗健康','教育院校','交通运输','金融银行','能源电力','商业/地产','文旅酒店','工业企业','其他']},
   {k:'province',    l:'省份',            t:'select', g:'项目基础', span:2, opt:['北京市','天津市','河北省','山西省','内蒙古自治区','辽宁省','吉林省','黑龙江省','上海市','江苏省','浙江省','安徽省','福建省','江西省','山东省','河南省','湖北省','湖南省','广东省','广西壮族自治区','海南省','重庆市','四川省','贵州省','云南省','西藏自治区','陕西省','甘肃省','青海省','宁夏回族自治区','新疆维吾尔自治区','香港特别行政区','澳门特别行政区','台湾省']},
-  {k:'deadline',    l:'投标截止时间',    t:'date',   g:'时间与地点'},
-  {k:'openTime',    l:'开标时间',        t:'date',   g:'时间与地点', req:1},
+  {k:'winnerCount', l:'中标单位数量',    t:'num',    g:'项目基础'},
+  {k:'taxRate',     l:'报价税率',        t:'text',   g:'项目基础'},
+  {k:'proxyAgent',  l:'委托代理人',      t:'text',   g:'项目基础'},
+  {k:'deadline',    l:'投标截止时间',    t:'datetime', g:'时间与地点'},
+  {k:'openTime',    l:'开标时间',        t:'datetime', g:'时间与地点', req:1},
   {k:'openAddr',    l:'开标地点',        t:'text',   g:'时间与地点', span:2},
   {k:'budget',      l:'预算/最高限价（元）', t:'num', g:'金额与保证金'},
   {k:'ourPrice',    l:'我方报价（元）', t:'num',   g:'金额与保证金'},
@@ -78,6 +81,7 @@ export const FORM_ITEMS = [];
 export function S0(o){ return Object.assign({
   projectName:'',bidNo:'',pkg:'',agency:'',owner:'',region:'',method:'公开招标',bizType:'标识标牌',
   projType:'',industry:'',province:'',
+  winnerCount:'',taxRate:'',proxyAgent:'',
   deadline:'',openTime:'',openAddr:'',
   budget:'',ourPrice:'',bondAmount:'',bondType:'银行转账',bondStatus:'已缴',perfAmount:'',perfStatus:'无需缴纳',
   bondIssuer:'',bondNo:'',bondPayDate:'',bondBackDate:'',bondDue:'',
@@ -195,6 +199,9 @@ export const ALIAS = {
  '采购方式':'method','招标类型':'method',
  '投标截止':'deadline','投标截止日期':'deadline','递交截止时间':'deadline','交标时间':'deadline','截标时间':'deadline',
  '开标日期':'openTime','开标':'openTime','开标时间地点':'openTime',
+ '中标单位数量':'winnerCount','中标人数量':'winnerCount','中标家数':'winnerCount',
+ '报价税率':'taxRate','税率':'taxRate','增值税率':'taxRate',
+ '委托代理人':'proxyAgent','授权代理人':'proxyAgent','代理委托人':'proxyAgent',
  '预算':'budget','预算金额':'budget','最高限价':'budget','控制价':'budget','项目预算':'budget','限价':'budget',
  '投标报价':'ourPrice','报价':'ourPrice','我方报价':'ourPrice','投标价':'ourPrice','投标总价':'ourPrice',
  '保证金':'bondAmount','保证金金额':'bondAmount','投标保证金':'bondAmount','投标保证金金额':'bondAmount','保证金(元)':'bondAmount',
@@ -320,8 +327,10 @@ export function rowsFromMatrix(mtx){
       else if(k === 'bidStatus') v = normBidStatus(v);
       else if(k === 'bondStatus' || k === 'perfStatus') v = normBond(v);
       else if(k === 'bondType') v = normBondType(v);
-      else if(['budget','ourPrice','bondAmount','perfAmount','winAmount','docFee','travelFee','sampleFee'].indexOf(k) >= 0) v = normNum(v);
-      else if(['deadline','openTime','bondPayDate','bondBackDate','bondDue',
+      else if(['budget','ourPrice','bondAmount','perfAmount','winAmount','docFee','travelFee','sampleFee','winnerCount'].indexOf(k) >= 0) v = normNum(v);
+      /* 投标截止 / 开标精确到秒；其余时间点（保证金、标书进度）仍是日期 */
+      else if(k === 'deadline' || k === 'openTime') v = normDT(v);
+      else if(['bondPayDate','bondBackDate','bondDue',
                'perfPayDate','perfBackDate','perfDue','bidWaitAt','bidStartAt','bidEndAt'].indexOf(k) >= 0) v = normDate(v);
       else v = String(v).trim();
       o[k] = v; filled++;

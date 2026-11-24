@@ -10,7 +10,7 @@ const router = useRouter();
 const canJump = computed(() => can('view.timeline'));
 function jump(name){
   if(!canJump.value || !name || name === '未指定') return;
-  router.push({path:'/timeline', query: timelineQuery({lead: name})});
+  router.push({path:'/taizhang/timeline', query: timelineQuery({lead: name})});
 }
 
 const list = computed(() => {

@@ -9,7 +9,7 @@ import json
 import time
 
 from . import guard
-from .catalog import ROLE_SEEDS
+from .catalog import ROLE_SEEDS, ROLE_SYSTEMS, perm_systems, system_for_dept
 from .database import DB_PATH, USERS_PATH, db
 from .security import hash_pw
 
@@ -33,10 +33,11 @@ def migrate_from_sqlite():
             "COALESCE(is_admin,0) AS is_admin, COALESCE(role_key,'staff') AS role_key "
             "FROM users").fetchall()
         for r in users:
-            db.execute('INSERT INTO users(username, pass_hash, display_name, is_admin, role_key) '
-                       'VALUES(?,?,?,?,?) ON CONFLICT(username) DO NOTHING',
+            db.execute('INSERT INTO users(username, pass_hash, display_name, is_admin, role_key, dept) '
+                       'VALUES(?,?,?,?,?,?) ON CONFLICT(username) DO NOTHING',
                        (r['username'], r['pass_hash'], r['display_name'],
-                        r['is_admin'], r['role_key']))
+                        r['is_admin'], r['role_key'],
+                        'management' if r['is_admin'] else 'bid'))
         moved['users'] = len(users)
 
         roles = src.execute('SELECT key, name, is_system, perms, field_perms, data_scope '
@@ -100,7 +101,8 @@ def init_db():
           pass_hash TEXT NOT NULL,
           display_name TEXT DEFAULT '',
           is_admin INTEGER DEFAULT 0,
-          role_key TEXT DEFAULT 'staff'
+          role_key TEXT DEFAULT 'staff',
+          dept TEXT DEFAULT 'bid'
         );
         CREATE TABLE IF NOT EXISTS rows(
           rid TEXT PRIMARY KEY,
@@ -124,7 +126,8 @@ def init_db():
           is_system INTEGER DEFAULT 0,
           perms TEXT NOT NULL DEFAULT '{}',
           field_perms TEXT NOT NULL DEFAULT '{}',
-          data_scope TEXT DEFAULT 'ALL'
+          data_scope TEXT DEFAULT 'ALL',
+          system TEXT DEFAULT 'taizhang'
         );
         CREATE TABLE IF NOT EXISTS audit_log(
           id BIGSERIAL PRIMARY KEY,
@@ -163,7 +166,30 @@ def init_db():
                 db.commit()
             except Exception:
                 db.rollback()
+        # 老库升级：users 补 dept 列（部门准入层，存量默认投标部 bid）
+        try:
+            db.execute("ALTER TABLE users ADD COLUMN dept TEXT DEFAULT 'bid'")
+            db.commit()
+        except Exception:
+            db.rollback()
+        # 老库升级：roles 补 system 列（角色归属系统，存量默认 taizhang）
+        try:
+            db.execute("ALTER TABLE roles ADD COLUMN system TEXT DEFAULT 'taizhang'")
+            db.commit()
+        except Exception:
+            db.rollback()
         migrate_from_sqlite()
+        # 角色系统归属回填：内置角色按 ROLE_SYSTEMS，存量空值归 taizhang
+        for rk, sys_key in ROLE_SYSTEMS.items():
+            db.execute("UPDATE roles SET system=? WHERE key=? AND (system IS NULL OR system='')",
+                       (sys_key, rk))
+        db.execute("UPDATE roles SET system='taizhang' WHERE system IS NULL OR system=''")
+        db.commit()
+        # 部门归位：管理员归 management（全模块），普通用户空 dept 归 bid。
+        # 只在空/非法值时补，不覆盖用户管理页已经设置好的部门。
+        db.execute("UPDATE users SET dept='management' WHERE is_admin=1 AND (dept IS NULL OR dept='' OR dept='bid')")
+        db.execute("UPDATE users SET dept='bid' WHERE dept IS NULL OR dept=''")
+        db.commit()
         # 删除墓碑只用于增量同步回放，保留 90 天足够覆盖长期离线客户端，避免表无限增长
         db.execute('DELETE FROM deleted WHERE ts < ?', (time.time() - 90 * 86400,))
         db.commit()
@@ -175,10 +201,11 @@ def seed_roles():
         for key, name, perms, fp, scope in ROLE_SEEDS:
             if db.execute('SELECT 1 FROM roles WHERE key=?', (key,)).fetchone():
                 continue
-            db.execute('INSERT INTO roles(key, name, is_system, perms, field_perms, data_scope) '
-                       'VALUES(?,?,1,?,?,?)',
+            db.execute('INSERT INTO roles(key, name, is_system, perms, field_perms, data_scope, system) '
+                       'VALUES(?,?,1,?,?,?,?)',
                        (key, name, json.dumps(perms, ensure_ascii=False),
-                        json.dumps(fp, ensure_ascii=False), scope))
+                        json.dumps(fp, ensure_ascii=False), scope,
+                        ROLE_SYSTEMS.get(key, 'taizhang')))
         db.commit()
 
 
@@ -193,16 +220,33 @@ def backfill_role_perms():
               'ai.layout': 'view.audit', 'bidcrawl.manage': 'bid.edit'}
     with guard.lock:
         changed = False
-        for r in db.execute('SELECT key, perms FROM roles').fetchall():
+        for r in db.execute('SELECT key, perms, field_perms, system FROM roles').fetchall():
             try:
                 perms = json.loads(r['perms'] or '{}')
             except Exception:
                 perms = {}
-            missing = [k for k in page_perms if k not in perms]
+            role_system = r['system'] if 'system' in r.keys() and r['system'] else 'taizhang'
+            # 非台账角色的字段权限（台账专属）清空
+            if role_system != 'taizhang':
+                try:
+                    fpx = json.loads(r['field_perms'] or '{}')
+                except Exception:
+                    fpx = {}
+                if fpx:
+                    db.execute('UPDATE roles SET field_perms=\'{}\' WHERE key=?', (r['key'],))
+                    changed = True
+            # 系统隔离：剔除不属于该角色系统的越界权限（存量数据一次性清理）
+            def visible(k):
+                return role_system in perm_systems(k)
+            removed = [k for k in list(perms) if not visible(k)]
+            for k in removed:
+                perms.pop(k, None)
+            # 只补该角色所属系统可见的权限项，禁止把财务权限塞给台账角色
+            missing = [k for k in page_perms if visible(k) and k not in perms]
             for k in follow:
-                if k not in perms:
+                if visible(k) and k not in perms:
                     missing.append(k)
-            if not missing:
+            if not missing and not removed:
                 continue
             for k in missing:
                 perms[k] = 1 if perms.get(follow.get(k, 'view.manage')) else 0
@@ -224,16 +268,21 @@ def sync_users():
         for name, cfg in data.items():
             if str(name).startswith('_'):
                 continue
+            is_admin = 1 if cfg.get('is_admin') else 0
+            # 部门：管理员恒 management；其余读 users.json 的 dept，缺省 bid（存量兼容）
+            dept = 'management' if is_admin else (cfg.get('dept') or 'bid')
             db.execute(
-                'INSERT INTO users(username, pass_hash, display_name, is_admin) VALUES(?,?,?,?) '
+                'INSERT INTO users(username, pass_hash, display_name, is_admin, dept) '
+                'VALUES(?,?,?,?,?) '
                 'ON CONFLICT(username) DO UPDATE SET pass_hash=excluded.pass_hash, '
-                'display_name=excluded.display_name, is_admin=excluded.is_admin',
+                'display_name=excluded.display_name, is_admin=excluded.is_admin, '
+                'dept=excluded.dept',
                 (name, hash_pw(cfg.get('password', '')), cfg.get('display_name', name),
-                 1 if cfg.get('is_admin') else 0))
+                 is_admin, dept))
         db.commit()
 
 
-def upsert_file_user(name, password=None, display_name=None, is_admin=None, remove=False):
+def upsert_file_user(name, password=None, display_name=None, is_admin=None, dept=None, remove=False):
     """把页面上的账号变动写回 users.json，重启服务后不丢失。
 
     文件读-改-写不是 DB 事务，去全局锁后必须用自己的细粒度锁保护，
@@ -253,6 +302,8 @@ def upsert_file_user(name, password=None, display_name=None, is_admin=None, remo
                 cfg['display_name'] = display_name
             if is_admin is not None:
                 cfg['is_admin'] = bool(is_admin)
+            if dept is not None:
+                cfg['dept'] = dept
             data[name] = cfg
         try:
             USERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')

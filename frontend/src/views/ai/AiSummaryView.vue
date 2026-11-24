@@ -39,7 +39,7 @@ async function onRidChange() {
   const done = AI.tasks.find(t => t.summary_id && ['DONE', 'PARTIAL'].includes(t.status))
   if (done) await loadSummary(done.summary_id)
 }
-function gotoFiles() { router.push('/files') }
+function gotoFiles() { router.push('/taizhang/files') }
 async function doConfirm() {
   if (reviewCount.value && !window.confirm(`仍有 ${reviewCount.value} 行含需复核项，确认定稿？定稿后不可修改。`)) return
   await confirm()

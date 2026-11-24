@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """采集条目 → 投标管理项目字段（报名用）。
 
-投标管理（台账）用的是 48 个字段：projectName / bidNo / owner / deadline /
+投标管理（台账）用的是 51 个字段：projectName / bidNo / owner / deadline /
 openTime …（前端 frontend/src/lib/fields.js 的 F）。采集侧自己的标准字段是
 title / buyer / budget / open_at …（bid_field_def），两套 key 完全不同。
 
@@ -24,6 +24,7 @@ from datetime import date, datetime
 PROJECT_FIELDS = (
     'projectName', 'bidNo', 'pkg', 'agency', 'owner', 'region', 'method',
     'bizType', 'projType', 'industry', 'province',
+    'winnerCount', 'taxRate', 'proxyAgent',
     'deadline', 'openTime', 'openAddr',
     'budget', 'ourPrice',
     'bondType', 'bondAmount', 'bondStatus', 'bondBackDate',
@@ -140,6 +141,33 @@ def _ymd(v) -> str:
     m = re.search(r'(\d{4})(\d{2})(\d{2})', s)
     if m:
         return '%s-%s-%s' % (m.group(1), m.group(2), m.group(3))
+    return ''
+
+
+def _dt(v) -> str:
+    """任意时间表示 → 'YYYY-MM-DD HH:MM:SS'（投标截止/开标精确到秒）。
+
+    采集侧 detail.deadline 形如 '2026-12-01 15:00'，open_at 是带时区的 datetime。
+    没有时分部分时补 00:00:00——与台账存储格式一致，报名后无需再转换。
+    """
+    if v in (None, ''):
+        return ''
+    if isinstance(v, datetime):
+        return v.strftime('%Y-%m-%d %H:%M:%S')
+    if isinstance(v, date):
+        return v.strftime('%Y-%m-%d 00:00:00')
+    s = _s(v)
+    if not s:
+        return ''
+    m = re.search(r'(\d{4})\s*[-/年.]\s*(\d{1,2})\s*[-/月.]\s*(\d{1,2})'
+                  r'(?:[日\sT]+(\d{1,2})\s*[:时]\s*(\d{1,2})(?:\s*[:分]\s*(\d{1,2}))?)?', s)
+    if m:
+        return '%04d-%02d-%02d %02d:%02d:%02d' % (
+            int(m.group(1)), int(m.group(2)), int(m.group(3)),
+            int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0))
+    m = re.search(r'(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})', s)
+    if m:
+        return '%s-%s-%s %s:%s:%s' % m.groups()
     return ''
 
 
@@ -266,7 +294,7 @@ def clean_title(title: str) -> str:
 
 # ------------------------------------------------------------------ 主入口
 def to_project(item: dict) -> dict:
-    """bid_item 行 → 台账 48 字段（缺失为 ''）。
+    """bid_item 行 → 台账 51 字段（缺失为 ''）。
 
     item 可以是接口里 SELECT * 的 dict，也可以是带 detail 的任意 dict。
     """
@@ -304,13 +332,19 @@ def to_project(item: dict) -> dict:
     p['projType'] = guess_proj_type(title, scope)
     p['method'] = norm_method(_s(pick('notice_type')), title)
 
-    # 时间：投标截止（deadline）与开标时间（openTime）分开取，
+    # 时间：投标截止（deadline）与开标时间（openTime）分开取，精确到秒。
     # 详情里只有合并的 open_at 时两者同值——但不要因此少写一个。
-    p['deadline'] = _ymd(pick('deadline')) or _ymd(item.get('doc_get_end')) \
-        or _ymd(pick('doc_get_end'))
-    p['openTime'] = _ymd(item.get('open_at')) or _ymd(pick('open_at')) \
+    # 保持 YYYY-MM-DD HH:MM:SS，与台账表单/展示一致，报名后无需再转换格式。
+    p['deadline'] = _dt(pick('deadline')) or _dt(item.get('doc_get_end')) \
+        or _dt(pick('doc_get_end'))
+    p['openTime'] = _dt(item.get('open_at')) or _dt(pick('open_at')) \
         or p['deadline']
     p['openAddr'] = _s(pick('bid_place'))
+
+    # 基础信息新增三项：公告里通常只有中标人数量，税率/委托代理人多为人工补录
+    p['winnerCount'] = _s(pick('bidder_limit'))
+    p['taxRate'] = ''
+    p['proxyAgent'] = ''
 
     budget = _money(item.get('budget_yuan')) or _money(pick('budget'))
     p['budget'] = budget

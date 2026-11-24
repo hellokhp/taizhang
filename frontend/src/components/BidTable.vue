@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount } from 'vue'
 import { ST, pagedRows, toggleSort, openEdit, openDetail, openBidUpload, removeRow, toggleSel, isSelected, selPageAll, setColWidth } from '@/stores/taizhang/bid'
-import { num, fmtN, dd } from '@/lib/format'
+import { num, fmtN, dd, fmtDT } from '@/lib/format'
 import { bondState, shortType, bidStatusOf, bidEffortDays } from '@/lib/fields'
 import { TABLE_MAP } from '@/lib/tableCols'
 import { can, canSee, isMasked } from '@/stores/common/perm'
@@ -176,8 +176,8 @@ function cellClass(c){
             <b class="pj-link" title="查看标段详情" @click.stop="openDetail(r.id)">{{ r.projectName || '—' }}</b>
             <span>{{ r.bidNo || '无编号' }}<template v-if="r.pkg"> · {{ r.pkg }}</template><template v-if="r.owner"> · {{ r.owner }}</template><template v-if="r.agency"> · 代理 {{ r.agency }}</template></span>
           </td>
-          <td v-else-if="c.k === 'time'" class="td-center">
-            {{ (rowTime(r) || '—').slice(5) }}
+          <td v-else-if="c.k === 'time'" class="td-center" :title="fmtDT(rowTime(r)) || '—'">
+            {{ fmtDT(rowTime(r)).slice(5) || '—' }}
             <span v-if="openSoon(r)" class="soon">{{ openSoonTxt(r) }}</span>
           </td>
           <td v-else-if="c.k === 'lead'">

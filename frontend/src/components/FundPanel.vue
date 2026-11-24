@@ -31,7 +31,7 @@ function drill(k){
 /* 带资金口径跳转投标管理：sc 跟随本卡的「本期 / 全部」口径 */
 function jump(code){
   if(!can('view.manage')){ toast('当前角色没有「投标管理」权限，无法查看项目明细'); return; }
-  router.push({ path:'/manage', query:{ fund: code, sc: scope.value } });
+  router.push({ path:'/taizhang/manage', query:{ fund: code, sc: scope.value } });
 }
 function back(){ open.value = ''; hot.value = ''; }
 

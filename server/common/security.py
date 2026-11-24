@@ -9,7 +9,8 @@ import json
 from fastapi import Depends, Header, HTTPException
 
 from . import guard
-from .catalog import FIELD_KEYS, LEVEL_KEYS, MASK_KEYS, PERM_KEYS
+from .catalog import (DEPARTMENTS, DEPT_KEYS, FIELD_KEYS, LEVEL_KEYS,
+                      MASK_KEYS, MODULES, PERM_KEYS)
 from .database import db
 
 
@@ -113,6 +114,48 @@ def perm_of(username):
 def need(username, key, msg='无权执行该操作'):
     if not perm_of(username)['perms'].get(key):
         raise HTTPException(403, msg)
+
+
+# ---------------- 部门 → 模块准入 ----------------
+# 部门是「能不能进这个模块」的硬门槛，角色权限是「进去后能做什么」的细粒度，
+# 两者独立叠加。is_admin 恒为 management（全模块），与角色超管旁路保持一致。
+def dept_of(username):
+    """返回用户的部门 key；管理员恒为 management。未知/空值归 bid（存量兼容）。"""
+    with guard.unlocked():
+        r = db.execute('SELECT dept, is_admin FROM users WHERE username=?', (username,)).fetchone()
+    if not r:
+        raise HTTPException(401, '账号不存在')
+    if r['is_admin']:
+        return 'management'
+    dept = r['dept']
+    return dept if dept in DEPT_KEYS else 'bid'
+
+
+def modules_of(username):
+    """返回该用户可访问的模块 key 列表（供前端菜单与登录响应使用）。"""
+    dept = dept_of(username)
+    for d in DEPARTMENTS:
+        if d[0] == dept:
+            return list(d[2])
+    return []
+
+
+def can_module(username, module):
+    return module in modules_of(username)
+
+
+def require_module(module):
+    """router 级准入依赖工厂：当前用户部门无权访问该模块时返回 403。
+    用法：app.include_router(router, dependencies=[Depends(require_module('finance'))])
+    这样不污染 router 定义本身，同一 router 挂到不同前缀时各有独立准入。"""
+    def dep(username: str = Depends(current_user)):
+        if not can_module(username, module):
+            dept = dept_of(username)
+            label = next((d[1] for d in DEPARTMENTS if d[0] == dept), dept)
+            mod_label = next((m[1] for m in MODULES if m[0] == module), module)
+            raise HTTPException(403, '部门「%s」无权访问「%s」模块' % (label, mod_label))
+        return username
+    return dep
 
 
 def filter_out(payload, field_perms):

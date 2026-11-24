@@ -37,6 +37,38 @@ export function ymLabel(from, to){
   if(fy === ty) return fy + '年' + fm + '–' + tm + '月';
   return fy + '年' + fm + '月 – ' + ty + '年' + tm + '月';
 }
+/* 带时分秒的时间：从任意写法里抽出 YYYY-MM-DD + HH:mm:ss，供排序用（纯日期按 00:00:00） */
+export function parseDT(s){
+  const d = parseD(s);
+  if(!d) return null;
+  const m = String(s||'').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(m){ d.setHours(+m[1], +m[2], +(m[3]||0), 0); }
+  return d;
+}
+/* 展示用：'2026-11-30 17:00:00' → '2026/11/30 17:00:00'；历史纯日期保持 '2026/11/30' */
+export function fmtDT(s){
+  if(!s) return '';
+  const m = String(s).match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(!m) return String(s);
+  const base = m[1] + '/' + pad(m[2]) + '/' + pad(m[3]);
+  return m[4] === undefined ? base
+    : base + ' ' + pad(m[4]) + ':' + pad(m[5]) + ':' + pad(m[6] || 0);
+}
+/* datetime-local 控件值（YYYY-MM-DDTHH:mm:ss）↔ 存储值（YYYY-MM-DD HH:mm:ss） */
+export function toLocalDT(s){
+  if(!s) return '';
+  const d = parseDT(s);
+  if(!d) return '';
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+    + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+export function fromLocalDT(s){ return s ? String(s).replace('T', ' ').slice(0, 19) : ''; }
+/* 导入归一化：保留时分秒，统一成 YYYY-MM-DD HH:mm:ss */
+export function normDT(v){
+  const d = parseDT(v);
+  return d ? d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+      + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) : '';
+}
 export function dd(s){ const d = parseD(s); return d ? Math.round((d - TODAY) / 86400000) : null; }
 export function num(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 /* 金额统一按元展示，保留两位小数 */

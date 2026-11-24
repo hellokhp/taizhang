@@ -552,7 +552,7 @@ async function enroll(it){
   }catch(e){ toast(e.message); }
   enrolling.value = 0;
 }
-function gotoManage(){ lastEnrolled.value = null; router.push('/manage'); }
+function gotoManage(){ lastEnrolled.value = null; router.push('/taizhang/manage'); }
 
 /* ==================== 字段正则配置 ==================== */
 const regexFields = ref([]);

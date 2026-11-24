@@ -4,6 +4,17 @@
    ================================================================ */
 import { auth } from '@/stores/common/auth'
 
+/** 部门模块准入：能不能进某个系统模块（后端有 403 硬拦截，这里只做 UI 显隐）。
+ *  模块清单随 /api/me 返回；老缓存无 modules 时按「全模块」兼容，避免升级瞬间菜单全消失。 */
+export function canModule(module){
+  const u = auth.user;
+  if(!u) return false;
+  if(u.isAdmin) return true;
+  const mods = u.modules;
+  if(!mods) return true;
+  return mods.includes(module);
+}
+
 /** 模块/操作权限：admin 恒真，其余取角色配置 */
 export function can(key){
   const u = auth.user;
